@@ -46,7 +46,7 @@ export default function PriceTicker({
       : 'text-[#4b5563]';
 
   return (
-    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-4 flex flex-col gap-2">
+    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-2 md:p-4 flex flex-col gap-2">
       {/* Top row: connection status */}
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-[#94a3b8] uppercase tracking-wide">BTC/USDT</span>
@@ -62,7 +62,7 @@ export default function PriceTicker({
 
       {/* Price row */}
       <div className="flex items-baseline gap-2">
-        <span className="text-3xl font-bold text-white tabular-nums">
+        <span className="text-2xl font-bold text-white tabular-nums md:text-3xl">
           {formatPrice(currentPrice)}
         </span>
         <span className={`text-lg font-semibold ${directionColor}`}>{directionArrow}</span>

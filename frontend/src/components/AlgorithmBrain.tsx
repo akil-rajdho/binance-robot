@@ -50,7 +50,7 @@ export default function AlgorithmBrain({ algoState }: Props) {
 
   if (!algoState) {
     return (
-      <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-4">
+      <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-2 md:p-4">
         <h2 className="text-sm font-semibold text-[#e2e8f0] mb-3">Algorithm Brain</h2>
         <p className="text-sm text-[#4b5563]">No data yet...</p>
       </div>
@@ -62,7 +62,7 @@ export default function AlgorithmBrain({ algoState }: Props) {
   const spread = algoState.high10min - algoState.currentPrice;
 
   return (
-    <div className={`rounded-lg border border-[#1E2A3D] border-l-4 ${accentClass} bg-[#111827] p-4 flex flex-col gap-3`}>
+    <div className={`rounded-lg border border-[#1E2A3D] border-l-4 ${accentClass} bg-[#111827] p-2 md:p-4 flex flex-col gap-3`}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-[#e2e8f0]">Algorithm Brain</h2>

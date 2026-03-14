@@ -141,7 +141,7 @@ func main() {
 	})
 
 	// 11. Create HTTP server
-	httpServer := server.NewServer(hub, db, sm, cfg.WhitebitAPIKey != "" && cfg.WhitebitAPISecret != "")
+	httpServer := server.NewServer(hub, db, sm, cfg.WhitebitAPIKey != "" && cfg.WhitebitAPISecret != "", cfg)
 
 	// 12. Start everything
 	ctx, cancel := context.WithCancel(context.Background())

@@ -43,7 +43,7 @@ export default function ActivePosition({ algoState }: Props) {
     (algoState.state === 'ORDER_PLACED' || algoState.state === 'POSITION_OPEN');
 
   return (
-    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-4 flex flex-col gap-3">
+    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-2 md:p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-[#e2e8f0]">
           {algoState?.state === 'ORDER_PLACED' ? 'Active Order' : 'Open Position'}
@@ -59,8 +59,8 @@ export default function ActivePosition({ algoState }: Props) {
         <p className="text-sm text-[#4b5563] py-2">No active position</p>
       ) : (
         <div className="space-y-3">
-          {/* Price levels */}
-          <div className="bg-[#0D1421] rounded-md p-3 space-y-2">
+          {/* Price levels — compact on mobile, full on desktop */}
+          <div className="bg-[#0D1421] rounded-md p-2 md:p-3 space-y-2">
             <PriceRow
               label={algoState.state === 'ORDER_PLACED' ? 'Order Price' : 'Entry Price'}
               price={algoState.activeOrderPrice}
@@ -70,9 +70,9 @@ export default function ActivePosition({ algoState }: Props) {
             <PriceRow label="Stop Loss" price={algoState.slPrice} colorClass="text-red-400" />
           </div>
 
-          {/* Distance indicators */}
+          {/* Distance indicators — hidden on mobile to keep it compact */}
           {algoState.tpPrice > 0 && algoState.slPrice > 0 && algoState.activeOrderPrice > 0 && (
-            <div className="text-xs text-[#94a3b8] flex gap-3">
+            <div className="hidden md:flex text-xs text-[#94a3b8] gap-3">
               <span>
                 TP dist:{' '}
                 <span className="text-green-400 font-medium">
@@ -90,8 +90,8 @@ export default function ActivePosition({ algoState }: Props) {
 
           {/* ORDER_PLACED countdown */}
           {algoState.state === 'ORDER_PLACED' && algoState.cancelAt && (
-            <div className="flex items-center gap-2 rounded-md bg-yellow-900/20 border border-yellow-800 px-3 py-2 text-sm">
-              <span className="text-yellow-400">Cancels in</span>
+            <div className="flex items-center gap-2 rounded-md bg-yellow-900/20 border border-yellow-800 px-2 py-2 text-sm md:px-3">
+              <span className="text-yellow-400 text-xs md:text-sm">Cancels in</span>
               <span className="font-mono font-bold text-orange-400">
                 {formatCountdown(algoState.cancelAt)}
               </span>
@@ -100,8 +100,8 @@ export default function ActivePosition({ algoState }: Props) {
 
           {/* POSITION_OPEN unrealized P&L */}
           {algoState.state === 'POSITION_OPEN' && (
-            <div className="flex items-center justify-between rounded-md bg-[#0D1421] border border-[#1E2A3D] px-3 py-2 text-sm">
-              <span className="text-[#94a3b8]">Unrealized P&amp;L</span>
+            <div className="flex items-center justify-between rounded-md bg-[#0D1421] border border-[#1E2A3D] px-2 py-2 text-sm md:px-3">
+              <span className="text-[#94a3b8] text-xs md:text-sm">Unrealized P&amp;L</span>
               <span className="font-mono font-semibold text-[#4b5563]">–</span>
             </div>
           )}

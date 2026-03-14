@@ -13,6 +13,9 @@ type Config struct {
 	PostgresDSN       string
 	RedisURL          string
 	Port              string
+	AdminPassword     string
+	DeployToken       string
+	DeployScript      string
 }
 
 func Load() (*Config, error) {
@@ -25,6 +28,9 @@ func Load() (*Config, error) {
 		PostgresDSN:       os.Getenv("POSTGRES_DSN"),
 		RedisURL:          os.Getenv("REDIS_URL"),
 		Port:              os.Getenv("PORT"),
+		AdminPassword:     os.Getenv("ADMIN_PASSWORD"),
+		DeployToken:       os.Getenv("DEPLOY_TOKEN"),
+		DeployScript:      os.Getenv("DEPLOY_SCRIPT"),
 	}
 
 	if cfg.WhitebitAPIKey == "" {
@@ -32,6 +38,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.WhitebitAPISecret == "" {
 		return nil, errors.New("WHITEBIT_API_SECRET is required")
+	}
+	if cfg.AdminPassword == "" {
+		return nil, errors.New("ADMIN_PASSWORD is required")
 	}
 
 	if cfg.PostgresDSN == "" {
@@ -42,6 +51,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.Port == "" {
 		cfg.Port = "8080"
+	}
+	if cfg.DeployScript == "" {
+		cfg.DeployScript = "/home/bitcoin/app/deploy.sh"
 	}
 
 	return cfg, nil

@@ -30,6 +30,7 @@ export default function PriceChart({ candles, high10min, trades }: Props) {
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const isMobile = window.innerWidth < 768;
     const chart = createChart(containerRef.current, {
       layout: {
         background: { color: '#0A0F1C' },
@@ -40,7 +41,7 @@ export default function PriceChart({ candles, high10min, trades }: Props) {
         horzLines: { color: '#1E2A3D' },
       },
       width: containerRef.current.clientWidth,
-      height: 300,
+      height: isMobile ? 250 : 400,
       rightPriceScale: {
         borderColor: 'transparent',
         textColor: '#4b6280',
@@ -85,10 +86,14 @@ export default function PriceChart({ candles, high10min, trades }: Props) {
     areaSeriesRef.current = areaSeries;
     lineSeriesRef.current = lineSeries;
 
-    // Responsive width
+    // Responsive width and height
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        chart.applyOptions({ width: entry.contentRect.width });
+        const newMobile = window.innerWidth < 768;
+        chart.applyOptions({
+          width: entry.contentRect.width,
+          height: newMobile ? 250 : 400,
+        });
       }
     });
     resizeObserver.observe(containerRef.current);
@@ -149,8 +154,8 @@ export default function PriceChart({ candles, high10min, trades }: Props) {
   }, [trades]);
 
   return (
-    <div className="rounded-xl border border-[#1E2A3D] bg-[#0A0F1C] p-4">
-      <div className="flex items-center justify-between mb-3">
+    <div className="rounded-xl border border-[#1E2A3D] bg-[#0A0F1C] p-2 md:p-4">
+      <div className="flex items-center justify-between mb-2 md:mb-3">
         <div>
           <h2 className="text-sm font-semibold text-white">BTC / USDT</h2>
           {candles.length > 0 && (
@@ -163,7 +168,7 @@ export default function PriceChart({ candles, high10min, trades }: Props) {
           {high10min > 0 && (
             <span className="flex items-center gap-1.5">
               <span className="inline-block w-4 border-t border-dashed border-[#94a3b8]/50" />
-              10m High
+              <span className="hidden sm:inline">10m High</span>
               <span className="text-[#e2e8f0] font-medium">${high10min.toLocaleString()}</span>
             </span>
           )}

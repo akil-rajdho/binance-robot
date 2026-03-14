@@ -12,3 +12,5 @@ frontend/out/
 
 # Environment files
 .env
+*.env.local
+deploy.sh.log

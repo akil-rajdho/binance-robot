@@ -85,7 +85,7 @@ function buildActiveTrade(algoState: AlgoState): Trade {
 
 // ── Hook ───────────────────────────────────────────────────────────────────────
 
-export function useTrading(): TradingState & {
+export function useTrading(token: string | null, onActivity?: () => void): TradingState & {
   startBot: () => Promise<void>;
   stopBot: () => Promise<void>;
   updateSettings: (settings: Record<string, string>) => Promise<void>;
@@ -95,12 +95,24 @@ export function useTrading(): TradingState & {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unmountedRef = useRef(false);
+  const tokenRef = useRef(token);
+
+  // Keep tokenRef current so callbacks always use the latest token
+  tokenRef.current = token;
+
+  const authHeaders = useCallback((): Record<string, string> => {
+    const t = tokenRef.current;
+    return t ? { Authorization: `Bearer ${t}` } : {};
+  }, []);
 
   // ── Fetch helpers ────────────────────────────────────────────────────────────
 
   const fetchTrades = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/trades`);
+      onActivity?.();
+      const res = await fetch(`${API_URL}/trades`, {
+        headers: authHeaders(),
+      });
       if (!res.ok) return;
       const trades: Trade[] = await res.json();
       const { todayPnl, totalPnl, winRate } = computePnlStats(trades);
@@ -108,11 +120,14 @@ export function useTrading(): TradingState & {
     } catch {
       // network errors are non-fatal
     }
-  }, []);
+  }, [authHeaders, onActivity]);
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/status`);
+      onActivity?.();
+      const res = await fetch(`${API_URL}/status`, {
+        headers: authHeaders(),
+      });
       if (!res.ok) return;
       const algoState: AlgoState = await res.json();
       const activeTrade =
@@ -128,14 +143,16 @@ export function useTrading(): TradingState & {
     } catch {
       // network errors are non-fatal
     }
-  }, []);
+  }, [authHeaders, onActivity]);
 
   // ── WebSocket connection ─────────────────────────────────────────────────────
 
   const connect = useCallback(() => {
     if (unmountedRef.current) return;
 
-    const ws = new WebSocket(WS_URL);
+    const t = tokenRef.current;
+    const wsUrl = t ? `${WS_URL}?token=${encodeURIComponent(t)}` : WS_URL;
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -226,7 +243,7 @@ export function useTrading(): TradingState & {
 
     ws.onclose = scheduleReconnect;
     ws.onerror = scheduleReconnect;
-  }, [fetchTrades]);
+  }, [fetchTrades, fetchStatus]);
 
   // ── Mount / unmount ──────────────────────────────────────────────────────────
 
@@ -258,22 +275,31 @@ export function useTrading(): TradingState & {
   // ── Actions ──────────────────────────────────────────────────────────────────
 
   const startBot = useCallback(async () => {
-    await fetch(`${API_URL}/bot/start`, { method: 'POST' });
-  }, []);
+    onActivity?.();
+    await fetch(`${API_URL}/bot/start`, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+  }, [authHeaders, onActivity]);
 
   const stopBot = useCallback(async () => {
-    await fetch(`${API_URL}/bot/stop`, { method: 'POST' });
-  }, []);
+    onActivity?.();
+    await fetch(`${API_URL}/bot/stop`, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+  }, [authHeaders, onActivity]);
 
   const updateSettings = useCallback(
     async (settings: Record<string, string>) => {
+      onActivity?.();
       await fetch(`${API_URL}/config`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(settings),
       });
     },
-    [],
+    [authHeaders, onActivity],
   );
 
   const refetchTrades = useCallback(async () => {

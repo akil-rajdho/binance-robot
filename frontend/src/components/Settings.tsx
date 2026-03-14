@@ -9,11 +9,13 @@ interface Props {
   onClose: () => void;
   onSave: (settings: Record<string, string>) => Promise<void>;
   currentEntryOffset?: number;
+  token?: string | null;
+  onActivity?: () => void;
 }
 
 const LEVERAGE_OPTIONS = ['1', '2', '3', '5', '10', '20'];
 
-export default function Settings({ open, onClose, onSave, currentEntryOffset }: Props) {
+export default function Settings({ open, onClose, onSave, currentEntryOffset, token, onActivity }: Props) {
   const [positionSize, setPositionSize] = useState('');
   const [leverage, setLeverage] = useState('1');
   const [dailyLossLimit, setDailyLossLimit] = useState('');
@@ -53,16 +55,20 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
 
   // Fetch API key status from backend on mount
   useEffect(() => {
-    fetch(`${API_URL}/api/status`)
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    onActivity?.();
+    fetch(`${API_URL}/api/status`, { headers })
       .then(r => r.json())
       .then((data: { hasApiKeys?: boolean }) => setApiKeysConfigured(data.hasApiKeys === true))
       .catch(() => setApiKeysConfigured(false));
-  }, []);
+  }, [token, onActivity]);
 
   // Pre-load current settings from backend when the drawer opens
   useEffect(() => {
     if (!open) return;
-    fetch(`${API_URL}/api/config`)
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    onActivity?.();
+    fetch(`${API_URL}/api/config`, { headers })
       .then(r => r.json())
       .then((settings: Record<string, string>) => {
         setPositionSize(settings.position_size_usdt || '700');
@@ -82,7 +88,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
         setMaxAtrUsdt(settings.max_atr_usdt ?? '');
       })
       .catch(console.error);
-  }, [open]);
+  }, [open, token, onActivity]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -125,9 +131,9 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
         />
       )}
 
-      {/* Drawer */}
+      {/* Drawer — full width on mobile, max-sm on desktop */}
       <aside
-        className={`fixed top-0 right-0 z-50 h-full w-full max-w-sm bg-[#111827] shadow-2xl border-l border-[#1E2A3D] flex flex-col transition-transform duration-300 ease-in-out ${
+        className={`fixed top-0 right-0 z-50 h-full w-full md:max-w-sm bg-[#111827] shadow-2xl border-l border-[#1E2A3D] flex flex-col transition-transform duration-300 ease-in-out ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
         aria-label="Settings drawer"
@@ -181,7 +187,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
               value={positionSize}
               onChange={(e) => setPositionSize(e.target.value)}
               placeholder="e.g. 700"
-              className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+              className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
             />
           </div>
 
@@ -194,7 +200,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
               id="leverage"
               value={leverage}
               onChange={(e) => setLeverage(e.target.value)}
-              className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+              className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
             >
               {LEVERAGE_OPTIONS.map((opt) => (
                 <option key={opt} value={opt}>
@@ -218,7 +224,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
               value={dailyLossLimit}
               onChange={(e) => setDailyLossLimit(e.target.value)}
               placeholder="e.g. 5"
-              className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+              className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
             />
           </div>
 
@@ -235,7 +241,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
               value={startingBalance}
               onChange={(e) => setStartingBalance(e.target.value)}
               placeholder="e.g. 10000"
-              className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+              className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
             />
           </div>
 
@@ -264,7 +270,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
                 value={entryOffsetInitial}
                 onChange={(e) => setEntryOffsetInitial(e.target.value)}
                 placeholder="e.g. 150"
-                className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
               />
             </div>
             <div className="space-y-1.5">
@@ -279,7 +285,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
                 value={entryOffsetStep}
                 onChange={(e) => setEntryOffsetStep(e.target.value)}
                 placeholder="e.g. 20"
-                className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
               />
             </div>
             <div className="space-y-1.5">
@@ -294,7 +300,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
                 value={entryOffsetMin}
                 onChange={(e) => setEntryOffsetMin(e.target.value)}
                 placeholder="e.g. 50"
-                className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
               />
             </div>
             <div className="space-y-1.5">
@@ -309,7 +315,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
                 value={orderCancelMinutes}
                 onChange={(e) => setOrderCancelMinutes(e.target.value)}
                 placeholder="e.g. 10"
-                className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
               />
             </div>
           </div>
@@ -331,7 +337,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
                 value={tpDistance}
                 onChange={(e) => setTpDistance(e.target.value)}
                 placeholder="e.g. 50"
-                className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
               />
               <p className="text-xs text-[#4b5563]">TP = entry − this value</p>
             </div>
@@ -347,7 +353,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
                 value={slDistance}
                 onChange={(e) => setSlDistance(e.target.value)}
                 placeholder="e.g. 200"
-                className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
               />
               <p className="text-xs text-[#4b5563]">SL = entry + this value</p>
             </div>
@@ -368,7 +374,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
                 step="0.0001"
                 value={minGapPct}
                 onChange={(e) => setMinGapPct(e.target.value)}
-                className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
               />
               <p className="text-xs text-[#4b5563]">Price must be at least this fraction below the 10-min high before placing an order. E.g. 0.001 = 0.1% gap required.</p>
             </div>
@@ -382,7 +388,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
                 step="0.0001"
                 value={cancelCooldownMinutes}
                 onChange={(e) => setCancelCooldownMinutes(e.target.value)}
-                className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
               />
               <p className="text-xs text-[#4b5563]">Wait this many minutes after a cancelled order before placing a new one. Prevents rapid re-entry after failed orders.</p>
             </div>
@@ -396,7 +402,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
                 step="0.0001"
                 value={entryOffsetPct}
                 onChange={(e) => setEntryOffsetPct(e.target.value)}
-                className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
               />
               <p className="text-xs text-[#4b5563]">Percentage of current price used as the initial order offset. E.g. 0.002 = 0.2% above price. Overrides the fixed initial offset when bot is fresh.</p>
             </div>
@@ -410,7 +416,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
                 step="0.0001"
                 value={minImpulsePct}
                 onChange={(e) => setMinImpulsePct(e.target.value)}
-                className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
               />
               <p className="text-xs text-[#4b5563]">The 10-min high must be at least this fraction above the 10-min window open to confirm a genuine impulse. E.g. 0.002 = 0.2%. Filters out flat-market false signals.</p>
             </div>
@@ -424,7 +430,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
                 step="1"
                 value={maxAtrUsdt}
                 onChange={(e) => setMaxAtrUsdt(e.target.value)}
-                className="w-full rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
               />
               <p className="text-xs text-[#4b5563]">Stop entering new trades when the 14-candle Average True Range exceeds this value. E.g. 300 means: if BTC is moving more than $300 per candle on average, skip entry. Set to 0 to disable.</p>
             </div>
@@ -447,14 +453,14 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset }: 
         <div className="border-t border-[#1E2A3D] px-5 py-4 flex gap-2">
           <button
             onClick={onClose}
-            className="flex-1 rounded-md border border-[#1E2A3D] bg-[#1A2332] px-4 py-2 text-sm font-medium text-[#94a3b8] hover:bg-[#1E2A3D] transition-colors"
+            className="flex-1 min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-4 py-2 text-sm font-medium text-[#94a3b8] hover:bg-[#1E2A3D] transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex-1 rounded-md bg-[#1E7CF8] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            className="flex-1 min-h-[44px] rounded-md bg-[#1E7CF8] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
           >
             {saving ? 'Saving...' : 'Save'}
           </button>
