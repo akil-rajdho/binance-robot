@@ -53,8 +53,8 @@ func ValidateToken(tokenStr, secret string) error {
 func Middleware(secret string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip authentication for the login endpoint.
-			if r.URL.Path == "/api/auth/login" {
+			// Skip authentication for public endpoints.
+			if r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/deploy" {
 				next.ServeHTTP(w, r)
 				return
 			}
