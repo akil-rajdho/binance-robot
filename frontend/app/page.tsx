@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '../src/contexts/AuthContext';
@@ -12,7 +12,7 @@ import ActivePosition from '../src/components/ActivePosition';
 import OrderHistory from '../src/components/OrderHistory';
 import ReasoningModal from '../src/components/ReasoningModal';
 import Settings from '../src/components/Settings';
-import DeployTerminal from '../src/components/DeployTerminal';
+import DeployTerminal, { API_URL as DEPLOY_API_URL } from '../src/components/DeployTerminal';
 import PriceChart from '../src/components/PriceChart';
 import AlgorithmReasoning from '../src/components/AlgorithmReasoning';
 import { Trade } from '../src/types/trading';
@@ -22,6 +22,27 @@ export default function Home() {
   const router = useRouter();
   const [reasoningTrade, setReasoningTrade] = useState<Trade | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [deployOpen, setDeployOpen] = useState(false);
+  const [deployLines, setDeployLines] = useState<string[]>([]);
+  const [deployRunning, setDeployRunning] = useState(false);
+
+  const fetchDeployLogs = useCallback(() => {
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+    fetch(`${DEPLOY_API_URL}/deploy/logs`, { headers })
+      .then(r => r.json())
+      .then((data: { lines?: string[]; running?: boolean }) => {
+        setDeployLines(data.lines ?? []);
+        setDeployRunning(data.running ?? false);
+      })
+      .catch(() => {});
+  }, [token]);
+
+  useEffect(() => {
+    if (!deployOpen) return;
+    fetchDeployLogs();
+    const id = setInterval(fetchDeployLogs, 2000);
+    return () => clearInterval(id);
+  }, [deployOpen, fetchDeployLogs]);
 
   const {
     connected,
@@ -95,6 +116,12 @@ export default function Home() {
             >
               History
             </Link>
+            <button
+              onClick={() => setDeployOpen(true)}
+              className="hidden md:inline-flex rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm font-medium text-[#94a3b8] transition-colors hover:bg-[#1E2A3D]"
+            >
+              Deploy
+            </button>
             <button
               onClick={() => void startBot()}
               disabled={botEnabled && connected}
@@ -183,8 +210,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Row 4: Deploy Terminal */}
-        <DeployTerminal token={token} onActivity={updateActivity} />
       </main>
 
       {/* Bottom navigation — mobile only */}
@@ -213,6 +238,13 @@ export default function Home() {
       </nav>
 
       {/* Modals / Drawers */}
+      <DeployTerminal
+        open={deployOpen}
+        onClose={() => setDeployOpen(false)}
+        token={token}
+        lines={deployLines}
+        running={deployRunning}
+      />
       <ReasoningModal
         trade={reasoningTrade}
         onClose={() => setReasoningTrade(null)}
