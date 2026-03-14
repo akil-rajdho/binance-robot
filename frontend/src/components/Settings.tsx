@@ -33,7 +33,7 @@ function SettingField({
           <label htmlFor={id} className="block text-sm font-semibold text-white mb-1">
             {label}
           </label>
-          <p className="text-sm text-[#64748b] leading-relaxed">{description}</p>
+          <p className="text-sm text-[#64748b] leading-relaxed whitespace-pre-line">{description}</p>
         </div>
         <div className="flex-1 max-w-xs">{children}</div>
       </div>
@@ -367,7 +367,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
             <SettingField
               id="highConfirmSeconds"
               label="High Confirmation Delay (seconds)"
-              description="After a new 10-minute high is observed, the bot waits this many seconds before placing a short order. If price spikes to a new high but then immediately reverses (a wick), the high will either change or disappear before the delay expires, and no order is placed. This is the most effective single protection against spike entries. Set to 0 to disable. Recommended: 120 seconds (2 minutes)."
+              description={`Waits this many seconds after a new 10-minute high is seen before placing any order. This is your primary spike protection.\n\nExample — without this filter: BTC is at $84,900. A whale buy pushes it to $85,400 for 8 seconds, then it crashes back to $84,800. The bot sees the new high of $85,400 and instantly places a short at $85,250. The whale is done — price never comes back up to fill your order. The order sits and cancels, wasting the cooldown window.\n\nExample — with 120 seconds: Same spike happens. The bot sees the $85,400 high but waits 2 minutes. Within 30 seconds price is back at $84,800 and the high resets. No order was ever placed. The bot correctly ignored a fake move.\n\nRecommended: 120 (2 minutes). Set to 0 to disable.`}
             >
               <input id="highConfirmSeconds" type="number" step="1" min="0" value={highConfirmSeconds}
                 onChange={e => setHighConfirmSeconds(e.target.value)} placeholder="e.g. 120" className={inputClass} />
@@ -376,7 +376,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
             <SettingField
               id="minGapPct"
               label="Minimum Gap Before Entry"
-              description="The current price must be at least this fraction below the 10-minute high before the bot will place an order. This ensures there is a meaningful gap between where price is now and the recent high, reducing the chance of entering on noise rather than a real pullback. Enter as a decimal — e.g. 0.001 means a 0.1% gap is required."
+              description={`Requires the current price to be at least this percentage below the 10-minute high before placing an order. Prevents entries when price is hovering right at the high with no room to confirm a reversal.\n\nExample — without this filter: BTC 10-min high is $85,000. Current price is $84,980 — just $20 below. The bot places a short. But price is still essentially at the high; it may easily tick up $20 more and trigger your stop loss before it ever moves down.\n\nExample — with 0.001 (0.1%): The bot only places a short when price has dropped at least $85 below the high (0.1% of $85,000). So the high is $85,000 but price must reach $84,915 or below first. This confirms that price has already started to pull back, giving your short a better starting position.\n\nEnter as a decimal: 0.001 = 0.1%, 0.002 = 0.2%.`}
             >
               <input id="minGapPct" type="number" step="0.0001" value={minGapPct}
                 onChange={e => setMinGapPct(e.target.value)} placeholder="e.g. 0.001 (0.1%)" className={inputClass} />
@@ -384,8 +384,8 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
 
             <SettingField
               id="entryOffsetPct"
-              label="Entry Offset % (override)"
-              description="When set, the initial order offset is calculated as this percentage of the current BTC price rather than using the fixed dollar initial offset. This makes the offset self-adjusting as BTC price changes over time. For example, 0.002 at $85,000 gives an offset of $170. Leave blank to use the fixed initial offset instead."
+              label="Entry Offset % (price-relative override)"
+              description={`Calculates the initial order offset as a percentage of the current BTC price instead of a fixed dollar amount. Because BTC price changes over time, a fixed $150 offset means very different things at $40,000 vs $100,000. This setting keeps the offset proportional.\n\nExample: You set 0.002 (0.2%). If BTC is at $85,000, the initial offset is $170 ($85,000 × 0.002). If BTC later rises to $95,000, the offset automatically becomes $190. Without this, you would need to manually update the dollar offset as BTC price moves.\n\nLeave blank to use the fixed "Initial Offset ($)" value from the Order Placement section instead. If both are set, this percentage override takes priority.`}
             >
               <input id="entryOffsetPct" type="number" step="0.0001" value={entryOffsetPct}
                 onChange={e => setEntryOffsetPct(e.target.value)} placeholder="e.g. 0.002 (0.2%)" className={inputClass} />
@@ -394,7 +394,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
             <SettingField
               id="minImpulsePct"
               label="Minimum Impulse Filter"
-              description="The 10-minute high must have risen at least this fraction above the opening price of the 10-minute window to confirm a genuine upward impulse. Without this filter, the bot can trigger on sideways-drifting markets where the 'high' is barely above the open. Enter as a decimal — e.g. 0.002 means the high must be at least 0.2% above the window open."
+              description={`Requires the 10-minute high to be at least this percentage above the price at the start of the 10-minute window. This confirms a real upward move happened, filtering out flat-market false signals where price drifts sideways and the "high" is barely above the open.\n\nExample — without this filter: BTC opens the 10-min window at $84,950 and drifts up to $85,000 over 10 minutes — a $50 move. The bot treats $85,000 as a valid high and starts looking for a short. But this is just random noise in a sideways market, not a real impulse. The strategy is designed for genuine moves up followed by reversals, not $50 drifts.\n\nExample — with 0.003 (0.3%): The high must be at least $255 above the window open (0.3% of $85,000). So the window must open at say $84,700 and reach at least $84,955. A real $300+ move confirms genuine buying pressure that the bot can trade the reversal of.\n\nEnter as a decimal: 0.002 = 0.2%, 0.003 = 0.3%.`}
             >
               <input id="minImpulsePct" type="number" step="0.0001" value={minImpulsePct}
                 onChange={e => setMinImpulsePct(e.target.value)} placeholder="e.g. 0.002 (0.2%)" className={inputClass} />
@@ -403,7 +403,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
             <SettingField
               id="cancelCooldownMinutes"
               label="Cancel Cooldown (minutes)"
-              description="After an order is cancelled (either because it expired or was manually stopped), the bot waits this many minutes before placing the next order. This prevents rapid-fire re-entry during choppy conditions where the bot keeps placing and cancelling. Set to 0 or leave blank to re-enter immediately."
+              description={`Forces a waiting period after any order cancellation before the bot is allowed to place a new order. This prevents the bot from churning — placing and cancelling orders repeatedly in a choppy market where price keeps moving just out of reach.\n\nExample — without cooldown: BTC is choppy around $85,000. The bot places a short at $85,150, price never fills, cancels after 10 min. Immediately places another at $85,050, still no fill, cancels again. This repeats 6 times in an hour, consuming your daily cancel budget and potentially flagging your account for excessive order activity.\n\nExample — with 5 minute cooldown: After each cancellation, the bot sits out for 5 minutes. This limits re-entry to a maximum of once every 15 minutes (10 min order lifetime + 5 min cooldown), giving the market time to develop a clearer direction before trying again.\n\nSet to 0 or leave blank to allow immediate re-entry.`}
             >
               <input id="cancelCooldownMinutes" type="number" step="1" value={cancelCooldownMinutes}
                 onChange={e => setCancelCooldownMinutes(e.target.value)} placeholder="e.g. 5" className={inputClass} />
@@ -412,7 +412,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
             <SettingField
               id="maxAtrUsdt"
               label="ATR Volatility Halt (USDT)"
-              description="The 14-candle Average True Range (ATR) measures how many dollars BTC moves per candle on average. If the ATR exceeds this threshold, the bot pauses new entries until volatility settles. This prevents trading during news-driven spikes where stop-losses are easily hit. A typical value is $300–$500. Set to 0 or leave blank to disable this filter entirely."
+              description={`Stops the bot from entering new trades when the market is moving too violently. ATR (Average True Range) measures the average dollar range of the last 14 candles — it tells you how much BTC typically moves in a single candle period. A high ATR means big, unpredictable swings.\n\nExample — without this filter: A major news event hits and BTC starts moving $500–$800 per candle. The bot places a short with a $200 stop loss. In this volatility, the $200 stop loss gets hit almost instantly on a single candle wick even if the overall direction would have been profitable. You take a maximum loss on a trade that should have worked.\n\nExample — with ATR halt at $300: During normal conditions the ATR is $150–$200, and the bot trades normally. During the news event the ATR jumps to $650. The bot detects this and pauses all new entries. It resumes automatically once the ATR calms back below $300. Your stop losses are sized for normal volatility ($150–$200 ATR), so you only trade when they make sense.\n\nSet to 0 or leave blank to disable. Typical values: $250–$400 depending on your stop loss size.`}
             >
               <input id="maxAtrUsdt" type="number" step="1" value={maxAtrUsdt}
                 onChange={e => setMaxAtrUsdt(e.target.value)} placeholder="e.g. 300" className={inputClass} />
