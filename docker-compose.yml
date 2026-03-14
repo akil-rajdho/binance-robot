@@ -37,7 +37,7 @@ services:
       - DEPLOY_SCRIPT=/project/deploy.sh
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${HOME}/binance-robot:/project
+      - /root/binance-robot:/project
     depends_on:
       postgres:
         condition: service_healthy
