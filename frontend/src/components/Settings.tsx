@@ -57,7 +57,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
   useEffect(() => {
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
     onActivity?.();
-    fetch(`${API_URL}/api/status`, { headers })
+    fetch(`${API_URL}/status`, { headers })
       .then(r => r.json())
       .then((data: { hasApiKeys?: boolean }) => setApiKeysConfigured(data.hasApiKeys === true))
       .catch(() => setApiKeysConfigured(false));
@@ -68,7 +68,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
     if (!open) return;
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
     onActivity?.();
-    fetch(`${API_URL}/api/config`, { headers })
+    fetch(`${API_URL}/config`, { headers })
       .then(r => r.json())
       .then((settings: Record<string, string>) => {
         setPositionSize(settings.position_size_usdt || '700');
