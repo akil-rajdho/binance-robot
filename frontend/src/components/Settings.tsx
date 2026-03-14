@@ -69,6 +69,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
   const [entryOffsetPct, setEntryOffsetPct] = useState('');
   const [minImpulsePct, setMinImpulsePct] = useState('');
   const [maxAtrUsdt, setMaxAtrUsdt] = useState('');
+  const [highConfirmSeconds, setHighConfirmSeconds] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -124,6 +125,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
         setEntryOffsetPct(settings.entry_offset_pct ?? '');
         setMinImpulsePct(settings.min_impulse_pct ?? '');
         setMaxAtrUsdt(settings.max_atr_usdt ?? '');
+        setHighConfirmSeconds(settings.high_confirm_seconds ?? '');
       })
       .catch(console.error);
   }, [open, token, onActivity]);
@@ -149,6 +151,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
         entry_offset_pct: entryOffsetPct,
         min_impulse_pct: minImpulsePct,
         max_atr_usdt: maxAtrUsdt,
+        high_confirm_seconds: highConfirmSeconds,
       });
       setSaveSuccess(true);
       window.scrollTo(0, 0);
@@ -360,6 +363,15 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
             description="Optional guards that prevent the bot from entering trades in unfavourable market conditions — flat markets with no clear direction, or highly volatile periods where price moves too fast to manage risk reliably. Leave blank to disable individual filters."
           />
           <div className="rounded-xl border border-[#1E2A3D] bg-[#111827] divide-y divide-[#1E2A3D] px-6">
+
+            <SettingField
+              id="highConfirmSeconds"
+              label="High Confirmation Delay (seconds)"
+              description="After a new 10-minute high is observed, the bot waits this many seconds before placing a short order. If price spikes to a new high but then immediately reverses (a wick), the high will either change or disappear before the delay expires, and no order is placed. This is the most effective single protection against spike entries. Set to 0 to disable. Recommended: 120 seconds (2 minutes)."
+            >
+              <input id="highConfirmSeconds" type="number" step="1" min="0" value={highConfirmSeconds}
+                onChange={e => setHighConfirmSeconds(e.target.value)} placeholder="e.g. 120" className={inputClass} />
+            </SettingField>
 
             <SettingField
               id="minGapPct"

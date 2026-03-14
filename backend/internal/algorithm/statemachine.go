@@ -171,8 +171,14 @@ type StateMachine struct {
 
 	maxATRUsdt   float64 // ATR halt threshold: skip entry if 14-candle ATR > this (default 300)
 
+	highConfirmSeconds int // seconds a new 10m high must persist before placing an order (0 = disabled)
+
 	// ATR candle buffer (rolling 15 candles: 14 periods need 15 candle highs/lows/closes)
 	atrCandles   []atrCandle // ring of last 15 candles for ATR computation
+
+	// high confirmation tracking
+	confirmedHigh float64    // the high value currently being timed
+	highFirstSeen time.Time  // when confirmedHigh was first observed
 
 	entryOffset          float64   // current offset for entry price (dynamic runtime state)
 	lastActiveOrderCheck time.Time // throttle: at most one active-order guard check per 30s
@@ -607,6 +613,16 @@ func (sm *StateMachine) OnPrice(price float64) {
 			}
 		}
 
+		// high_confirm_seconds: wait for the 10m high to stabilise before entering.
+		// If the high changes, reset the timer.
+		if sm.confirmedHigh != high {
+			sm.confirmedHigh = high
+			sm.highFirstSeen = time.Now()
+		}
+		if sm.highConfirmSeconds > 0 && time.Since(sm.highFirstSeen) < time.Duration(sm.highConfirmSeconds)*time.Second {
+			return
+		}
+
 		// Active order guard: before placing, check if an order already exists on WhiteBit.
 		// Throttled to at most once every 30 seconds.
 		if time.Since(sm.lastActiveOrderCheck) >= 30*time.Second {
@@ -978,6 +994,11 @@ func (sm *StateMachine) LoadConfig() error {
 		return fmt.Errorf("GetSetting(max_atr_usdt): %w", err)
 	}
 
+	highConfirmSecondsStr, err := sm.db.GetSetting("high_confirm_seconds")
+	if err != nil {
+		return fmt.Errorf("GetSetting(high_confirm_seconds): %w", err)
+	}
+
 	var posSize float64
 	if _, scanErr := fmt.Sscanf(posSizeStr, "%f", &posSize); scanErr != nil {
 		return fmt.Errorf("parse position_size_usdt %q: %w", posSizeStr, scanErr)
@@ -1048,6 +1069,11 @@ func (sm *StateMachine) LoadConfig() error {
 		return fmt.Errorf("parse max_atr_usdt %q: %w", maxATRUsdtStr, scanErr)
 	}
 
+	var highConfirmSeconds int
+	if _, scanErr := fmt.Sscanf(highConfirmSecondsStr, "%d", &highConfirmSeconds); scanErr != nil {
+		return fmt.Errorf("parse high_confirm_seconds %q: %w", highConfirmSecondsStr, scanErr)
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.positionSizeUSDT = posSize
@@ -1065,11 +1091,12 @@ func (sm *StateMachine) LoadConfig() error {
 	sm.entryOffsetPct = entryOffsetPct
 	sm.minImpulsePct = minImpulsePct
 	sm.maxATRUsdt = maxATRUsdt
+	sm.highConfirmSeconds = highConfirmSeconds
 
-	log.Printf("[StateMachine] Config loaded: positionSize=%.2f, leverage=%d, dailyLossLimit=%.4f, botEnabled=%v, entryOffsetInitial=%.0f, entryOffsetStep=%.0f, entryOffsetMin=%.0f, orderCancelMinutes=%.0f, tpDistance=%.0f, slDistance=%.0f, minGapPct=%.4f, cooldownMins=%.0f, offsetPct=%.4f, impulsePct=%.4f, maxATR=%.0f",
+	log.Printf("[StateMachine] Config loaded: positionSize=%.2f, leverage=%d, dailyLossLimit=%.4f, botEnabled=%v, entryOffsetInitial=%.0f, entryOffsetStep=%.0f, entryOffsetMin=%.0f, orderCancelMinutes=%.0f, tpDistance=%.0f, slDistance=%.0f, minGapPct=%.4f, cooldownMins=%.0f, offsetPct=%.4f, impulsePct=%.4f, maxATR=%.0f, highConfirmSeconds=%d",
 		sm.positionSizeUSDT, sm.leverage, sm.dailyLossLimitPct, sm.botEnabled,
 		sm.entryOffsetInitial, sm.entryOffsetStep, sm.entryOffsetMin, sm.orderCancelMinutes,
-		sm.tpDistance, sm.slDistance, sm.minGapPct, sm.cancelCooldownMins, sm.entryOffsetPct, sm.minImpulsePct, sm.maxATRUsdt)
+		sm.tpDistance, sm.slDistance, sm.minGapPct, sm.cancelCooldownMins, sm.entryOffsetPct, sm.minImpulsePct, sm.maxATRUsdt, sm.highConfirmSeconds)
 	return nil
 }
 

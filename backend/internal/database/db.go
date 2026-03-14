@@ -129,6 +129,7 @@ func (d *DB) insertDefaultSettings() error {
 		"entry_offset_pct":       "0.0020",
 		"min_impulse_pct":        "0.0020",
 		"max_atr_usdt":           "300",
+		"high_confirm_seconds":   "120",
 	}
 
 	for key, value := range defaults {
