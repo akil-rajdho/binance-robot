@@ -12,6 +12,7 @@ import ActivePosition from '../src/components/ActivePosition';
 import OrderHistory from '../src/components/OrderHistory';
 import ReasoningModal from '../src/components/ReasoningModal';
 import Settings from '../src/components/Settings';
+import DeployTerminal from '../src/components/DeployTerminal';
 import PriceChart from '../src/components/PriceChart';
 import AlgorithmReasoning from '../src/components/AlgorithmReasoning';
 import { Trade } from '../src/types/trading';
@@ -181,6 +182,9 @@ export default function Home() {
             />
           </div>
         </div>
+
+        {/* Row 4: Deploy Terminal */}
+        <DeployTerminal token={token} onActivity={updateActivity} />
       </main>
 
       {/* Bottom navigation — mobile only */}

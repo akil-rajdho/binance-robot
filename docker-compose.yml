@@ -34,7 +34,10 @@ services:
       - REDIS_URL=redis://redis:6379
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - DEPLOY_TOKEN=${DEPLOY_TOKEN}
-      - DEPLOY_SCRIPT=/app/deploy.sh
+      - DEPLOY_SCRIPT=/project/deploy.sh
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/binance-robot:/project
     depends_on:
       postgres:
         condition: service_healthy

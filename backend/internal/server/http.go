@@ -1,17 +1,26 @@
 package server
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os/exec"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/bitcoin-robot/backend/internal/algorithm"
 	"github.com/bitcoin-robot/backend/internal/auth"
 	"github.com/bitcoin-robot/backend/internal/config"
 	"github.com/bitcoin-robot/backend/internal/database"
+)
+
+var (
+	deployMu      sync.Mutex
+	deployLines   []string
+	deployRunning bool
 )
 
 // DBStore is the subset of the database layer the server needs.
@@ -66,6 +75,7 @@ func (s *Server) registerRoutes() {
 	// Public endpoints — auth middleware skips /api/auth/login; /api/deploy uses its own token check.
 	s.mux.HandleFunc("/api/auth/login", s.handleLogin)
 	s.mux.HandleFunc("/api/deploy", s.handleDeploy)
+	s.mux.HandleFunc("/api/deploy/logs", s.handleDeployLogs)
 
 	// Protected endpoints (covered by the auth middleware applied in Handler).
 	s.mux.HandleFunc("/ws", s.hub.HandleWS)
@@ -157,20 +167,73 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	deployMu.Lock()
+	if deployRunning {
+		deployMu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]string{"status": "deploy already running"})
+		return
+	}
+	deployRunning = true
+	deployLines = []string{"[deploy] started at " + time.Now().Format(time.RFC3339)}
+	deployMu.Unlock()
+
+	pr, pw := io.Pipe()
 	cmd := exec.Command("sh", "-c", s.cfg.DeployScript)
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
 	if err := cmd.Start(); err != nil {
 		log.Printf("[Server] deploy script start error: %v", err)
+		pw.Close()
+		deployMu.Lock()
+		deployRunning = false
+		deployMu.Unlock()
 		writeError(w, http.StatusInternalServerError, "failed to start deploy")
 		return
 	}
-	// Run detached — don't wait for completion.
+
 	go func() {
-		if err := cmd.Wait(); err != nil {
-			log.Printf("[Server] deploy script exited with error: %v", err)
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			deployMu.Lock()
+			deployLines = append(deployLines, line)
+			deployMu.Unlock()
 		}
 	}()
 
+	go func() {
+		err := cmd.Wait()
+		pw.Close()
+		deployMu.Lock()
+		deployRunning = false
+		if err != nil {
+			deployLines = append(deployLines, "[deploy] exited with error: "+err.Error())
+		} else {
+			deployLines = append(deployLines, "[deploy] finished successfully")
+		}
+		deployMu.Unlock()
+	}()
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deploy started"})
+}
+
+// GET /api/deploy/logs — returns captured output lines from the most recent deploy run.
+func (s *Server) handleDeployLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	deployMu.Lock()
+	lines := make([]string, len(deployLines))
+	copy(lines, deployLines)
+	running := deployRunning
+	deployMu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"lines":   lines,
+		"running": running,
+	})
 }
 
 // GET /api/status — returns the current AlgoState plus hasApiKeys flag.
