@@ -15,6 +15,44 @@ interface Props {
 
 const LEVERAGE_OPTIONS = ['1', '2', '3', '5', '10', '20'];
 
+function SettingField({
+  id,
+  label,
+  description,
+  children,
+}: {
+  id: string;
+  label: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="py-5 border-b border-[#1E2A3D] last:border-0">
+      <div className="flex flex-col md:flex-row md:items-start md:gap-8">
+        <div className="md:w-80 mb-3 md:mb-0 flex-shrink-0">
+          <label htmlFor={id} className="block text-sm font-semibold text-white mb-1">
+            {label}
+          </label>
+          <p className="text-sm text-[#64748b] leading-relaxed">{description}</p>
+        </div>
+        <div className="flex-1 max-w-xs">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeader({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="pb-4 mb-1">
+      <h2 className="text-base font-bold text-white mb-1">{title}</h2>
+      <p className="text-sm text-[#64748b]">{description}</p>
+    </div>
+  );
+}
+
+const inputClass =
+  'w-full min-h-[44px] rounded-lg border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition';
+
 export default function Settings({ open, onClose, onSave, currentEntryOffset, token, onActivity }: Props) {
   const [positionSize, setPositionSize] = useState('');
   const [leverage, setLeverage] = useState('1');
@@ -36,7 +74,6 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [apiKeysConfigured, setApiKeysConfigured] = useState<boolean | null>(null);
 
-  // Close on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -45,15 +82,17 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
     return () => document.removeEventListener('keydown', handler);
   }, [open, onClose]);
 
-  // Reset success state when reopening
   useEffect(() => {
     if (open) {
       setSaveSuccess(false);
       setSaveError(null);
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
     }
+    return () => { document.body.style.overflow = ''; };
   }, [open]);
 
-  // Fetch API key status from backend on mount
   useEffect(() => {
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
     onActivity?.();
@@ -63,7 +102,6 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
       .catch(() => setApiKeysConfigured(false));
   }, [token, onActivity]);
 
-  // Pre-load current settings from backend when the drawer opens
   useEffect(() => {
     if (!open) return;
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
@@ -113,6 +151,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
         max_atr_usdt: maxAtrUsdt,
       });
       setSaveSuccess(true);
+      window.scrollTo(0, 0);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -120,352 +159,274 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
     }
   };
 
+  if (!open) return null;
+
   return (
-    <>
-      {/* Backdrop */}
-      {open && (
-        <div
-          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
-          onClick={onClose}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* Drawer — full width on mobile, max-sm on desktop */}
-      <aside
-        className={`fixed top-0 right-0 z-50 h-full w-full md:max-w-sm bg-[#111827] shadow-2xl border-l border-[#1E2A3D] flex flex-col transition-transform duration-300 ease-in-out ${
-          open ? 'translate-x-0' : 'translate-x-full'
-        }`}
-        aria-label="Settings drawer"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#1E2A3D] px-5 py-4">
-          <h2 className="text-base font-semibold text-white">Settings</h2>
-          <button
-            onClick={onClose}
-            className="rounded-md p-1.5 text-[#94a3b8] hover:bg-[#1A2332] hover:text-white transition-colors"
-            aria-label="Close settings"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M2 2l12 12M14 2L2 14" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Form */}
-        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
-          {/* API Key Status */}
-          <div className={`rounded-md border px-3 py-2.5 flex items-center gap-2 text-sm ${
-            apiKeysConfigured === true
-              ? 'bg-green-900/30 border-green-800 text-green-400'
-              : apiKeysConfigured === false
-              ? 'bg-red-900/30 border-red-800 text-red-400'
-              : 'bg-[#0D1421] border-[#1E2A3D] text-[#94a3b8]'
-          }`}>
-            <span
-              className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
-                apiKeysConfigured === true ? 'bg-green-500' : apiKeysConfigured === false ? 'bg-red-500' : 'bg-[#4b5563]'
-              }`}
-            />
-            {apiKeysConfigured === true
-              ? 'API keys configured'
-              : apiKeysConfigured === false
-              ? 'No API keys — set in .env file'
-              : 'Checking API keys...'}
-          </div>
-
-          {/* Position Size */}
-          <div className="space-y-1.5">
-            <label htmlFor="positionSize" className="block text-sm font-medium text-[#94a3b8]">
-              Position Size (USDT)
-            </label>
-            <input
-              id="positionSize"
-              type="number"
-              min="1"
-              step="any"
-              value={positionSize}
-              onChange={(e) => setPositionSize(e.target.value)}
-              placeholder="e.g. 700"
-              className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-            />
-          </div>
-
-          {/* Leverage */}
-          <div className="space-y-1.5">
-            <label htmlFor="leverage" className="block text-sm font-medium text-[#94a3b8]">
-              Leverage
-            </label>
-            <select
-              id="leverage"
-              value={leverage}
-              onChange={(e) => setLeverage(e.target.value)}
-              className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
+    <div className="fixed inset-0 z-50 bg-[#0D1421] overflow-y-auto">
+      {/* Top bar */}
+      <div className="sticky top-0 z-10 bg-[#0D1421]/95 backdrop-blur border-b border-[#1E2A3D]">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+          <h1 className="text-base font-bold text-white">Settings</h1>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="min-h-[36px] rounded-lg border border-[#1E2A3D] bg-[#1A2332] px-4 text-sm font-medium text-[#94a3b8] hover:bg-[#1E2A3D] transition-colors"
             >
-              {LEVERAGE_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}x
-                </option>
-              ))}
-            </select>
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="min-h-[36px] rounded-lg bg-[#1E7CF8] px-4 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            >
+              {saving ? 'Saving…' : 'Save Settings'}
+            </button>
           </div>
+        </div>
+      </div>
 
-          {/* Daily Loss Limit */}
-          <div className="space-y-1.5">
-            <label htmlFor="dailyLossLimit" className="block text-sm font-medium text-[#94a3b8]">
-              Daily Loss Limit (%)
-            </label>
-            <input
-              id="dailyLossLimit"
-              type="number"
-              min="0"
-              max="100"
-              step="any"
-              value={dailyLossLimit}
-              onChange={(e) => setDailyLossLimit(e.target.value)}
-              placeholder="e.g. 5"
-              className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-            />
-          </div>
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-12">
 
-          {/* Starting Balance */}
-          <div className="space-y-1.5">
-            <label htmlFor="startingBalance" className="block text-sm font-medium text-[#94a3b8]">
-              Starting Balance (USDT)
-            </label>
-            <input
-              id="startingBalance"
-              type="number"
-              min="0"
-              step="any"
-              value={startingBalance}
-              onChange={(e) => setStartingBalance(e.target.value)}
-              placeholder="e.g. 10000"
-              className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-            />
-          </div>
-
-          {/* Entry Offset */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-semibold text-[#94a3b8] uppercase tracking-wide border-b border-[#1E2A3D] pb-1 mb-3">
-              Entry Offset
-            </h3>
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-[#94a3b8]">
-                Current Offset <span className="text-xs text-[#4b5563] font-normal">(live)</span>
-              </label>
-              <div className="w-full rounded-md border border-[#1E2A3D] bg-[#0D1421] px-3 py-2 text-sm text-[#94a3b8]">
-                {currentEntryOffset ?? '—'}
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="entryOffsetInitial" className="block text-sm font-medium text-[#94a3b8]">
-                Initial Offset ($)
-              </label>
-              <input
-                id="entryOffsetInitial"
-                type="number"
-                min="0"
-                step="any"
-                value={entryOffsetInitial}
-                onChange={(e) => setEntryOffsetInitial(e.target.value)}
-                placeholder="e.g. 150"
-                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="entryOffsetStep" className="block text-sm font-medium text-[#94a3b8]">
-                Decrease Step ($)
-              </label>
-              <input
-                id="entryOffsetStep"
-                type="number"
-                min="0"
-                step="any"
-                value={entryOffsetStep}
-                onChange={(e) => setEntryOffsetStep(e.target.value)}
-                placeholder="e.g. 20"
-                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="entryOffsetMin" className="block text-sm font-medium text-[#94a3b8]">
-                Minimum Offset ($)
-              </label>
-              <input
-                id="entryOffsetMin"
-                type="number"
-                min="0"
-                step="any"
-                value={entryOffsetMin}
-                onChange={(e) => setEntryOffsetMin(e.target.value)}
-                placeholder="e.g. 50"
-                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="orderCancelMinutes" className="block text-sm font-medium text-[#94a3b8]">
-                Cancel After (min)
-              </label>
-              <input
-                id="orderCancelMinutes"
-                type="number"
-                min="1"
-                step="1"
-                value={orderCancelMinutes}
-                onChange={(e) => setOrderCancelMinutes(e.target.value)}
-                placeholder="e.g. 10"
-                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-              />
-            </div>
-          </div>
-
-          {/* Take Profit / Stop Loss */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-semibold text-[#94a3b8] uppercase tracking-wide border-b border-[#1E2A3D] pb-1 mb-3">
-              Take Profit / Stop Loss
-            </h3>
-            <div className="space-y-1.5">
-              <label htmlFor="tpDistance" className="block text-sm font-medium text-[#94a3b8]">
-                TP Distance ($)
-              </label>
-              <input
-                id="tpDistance"
-                type="number"
-                min="0"
-                step="any"
-                value={tpDistance}
-                onChange={(e) => setTpDistance(e.target.value)}
-                placeholder="e.g. 50"
-                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-              />
-              <p className="text-xs text-[#4b5563]">TP = entry − this value</p>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="slDistance" className="block text-sm font-medium text-[#94a3b8]">
-                SL Distance ($)
-              </label>
-              <input
-                id="slDistance"
-                type="number"
-                min="0"
-                step="any"
-                value={slDistance}
-                onChange={(e) => setSlDistance(e.target.value)}
-                placeholder="e.g. 200"
-                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-              />
-              <p className="text-xs text-[#4b5563]">SL = entry + this value</p>
-            </div>
-          </div>
-
-          {/* Filters & Volatility Controls */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-semibold text-[#94a3b8] uppercase tracking-wide border-b border-[#1E2A3D] pb-1 mb-3">
-              Filters &amp; Volatility Controls
-            </h3>
-            <div className="space-y-1.5">
-              <label htmlFor="minGapPct" className="block text-sm font-medium text-[#94a3b8]">
-                Min Gap Before Entry
-              </label>
-              <input
-                id="minGapPct"
-                type="number"
-                step="0.0001"
-                value={minGapPct}
-                onChange={(e) => setMinGapPct(e.target.value)}
-                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-              />
-              <p className="text-xs text-[#4b5563]">Price must be at least this fraction below the 10-min high before placing an order. E.g. 0.001 = 0.1% gap required.</p>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="cancelCooldownMinutes" className="block text-sm font-medium text-[#94a3b8]">
-                Cancel Cooldown (minutes)
-              </label>
-              <input
-                id="cancelCooldownMinutes"
-                type="number"
-                step="0.0001"
-                value={cancelCooldownMinutes}
-                onChange={(e) => setCancelCooldownMinutes(e.target.value)}
-                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-              />
-              <p className="text-xs text-[#4b5563]">Wait this many minutes after a cancelled order before placing a new one. Prevents rapid re-entry after failed orders.</p>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="entryOffsetPct" className="block text-sm font-medium text-[#94a3b8]">
-                Entry Offset % (decimal)
-              </label>
-              <input
-                id="entryOffsetPct"
-                type="number"
-                step="0.0001"
-                value={entryOffsetPct}
-                onChange={(e) => setEntryOffsetPct(e.target.value)}
-                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-              />
-              <p className="text-xs text-[#4b5563]">Percentage of current price used as the initial order offset. E.g. 0.002 = 0.2% above price. Overrides the fixed initial offset when bot is fresh.</p>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="minImpulsePct" className="block text-sm font-medium text-[#94a3b8]">
-                Min Impulse Filter (decimal)
-              </label>
-              <input
-                id="minImpulsePct"
-                type="number"
-                step="0.0001"
-                value={minImpulsePct}
-                onChange={(e) => setMinImpulsePct(e.target.value)}
-                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-              />
-              <p className="text-xs text-[#4b5563]">The 10-min high must be at least this fraction above the 10-min window open to confirm a genuine impulse. E.g. 0.002 = 0.2%. Filters out flat-market false signals.</p>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="maxAtrUsdt" className="block text-sm font-medium text-[#94a3b8]">
-                ATR Volatility Halt (USDT)
-              </label>
-              <input
-                id="maxAtrUsdt"
-                type="number"
-                step="1"
-                value={maxAtrUsdt}
-                onChange={(e) => setMaxAtrUsdt(e.target.value)}
-                className="w-full min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm text-white placeholder-[#4b5563] focus:border-[#1E7CF8] focus:outline-none focus:ring-2 focus:ring-[#1E7CF8]/20 transition"
-              />
-              <p className="text-xs text-[#4b5563]">Stop entering new trades when the 14-candle Average True Range exceeds this value. E.g. 300 means: if BTC is moving more than $300 per candle on average, skip entry. Set to 0 to disable.</p>
-            </div>
-          </div>
-
-          {/* Feedback messages */}
-          {saveError && (
-            <p className="text-sm text-red-400 rounded-md bg-red-900/30 border border-red-800 px-3 py-2">
-              {saveError}
-            </p>
-          )}
-          {saveSuccess && (
-            <p className="text-sm text-green-400 rounded-md bg-green-900/30 border border-green-800 px-3 py-2">
-              Settings saved successfully.
-            </p>
-          )}
+        {/* Status banner */}
+        <div className={`rounded-xl border px-4 py-3 flex items-center gap-3 text-sm ${
+          apiKeysConfigured === true
+            ? 'bg-green-900/20 border-green-800 text-green-400'
+            : apiKeysConfigured === false
+            ? 'bg-red-900/20 border-red-800 text-red-400'
+            : 'bg-[#111827] border-[#1E2A3D] text-[#94a3b8]'
+        }`}>
+          <span className={`inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+            apiKeysConfigured === true ? 'bg-green-500' : apiKeysConfigured === false ? 'bg-red-500' : 'bg-[#4b5563]'
+          }`} />
+          {apiKeysConfigured === true
+            ? 'WhiteBit API keys are configured. The bot can place live orders.'
+            : apiKeysConfigured === false
+            ? 'No API keys detected. Set WHITEBIT_API_KEY and WHITEBIT_API_SECRET in your .env file on the server, then restart the backend.'
+            : 'Checking API key status…'}
         </div>
 
-        {/* Footer */}
-        <div className="border-t border-[#1E2A3D] px-5 py-4 flex gap-2">
+        {/* Save feedback */}
+        {saveError && (
+          <div className="rounded-xl border border-red-800 bg-red-900/20 px-4 py-3 text-sm text-red-400">
+            {saveError}
+          </div>
+        )}
+        {saveSuccess && (
+          <div className="rounded-xl border border-green-800 bg-green-900/20 px-4 py-3 text-sm text-green-400">
+            Settings saved. Changes take effect immediately — no restart required.
+          </div>
+        )}
+
+        {/* ── Section 1: Position & Risk ── */}
+        <section>
+          <SectionHeader
+            title="Position & Risk"
+            description="Control how much capital the bot commits per trade and how large your total daily loss exposure can grow before trading is paused."
+          />
+          <div className="rounded-xl border border-[#1E2A3D] bg-[#111827] divide-y divide-[#1E2A3D] px-6">
+
+            <SettingField
+              id="positionSize"
+              label="Position Size (USDT)"
+              description="The notional value of each trade in USDT before leverage is applied. For example, a position size of 700 USDT with 2× leverage controls $1,400 worth of BTC. Keep this well within your available margin to avoid liquidation risk."
+            >
+              <input id="positionSize" type="number" min="1" step="any" value={positionSize}
+                onChange={e => setPositionSize(e.target.value)} placeholder="e.g. 700" className={inputClass} />
+            </SettingField>
+
+            <SettingField
+              id="leverage"
+              label="Leverage"
+              description="Multiplier applied to your position size. Higher leverage amplifies both profits and losses. At 1× you are fully collateralised and cannot be liquidated by normal price moves. Most traders start at 1× or 2× until they have confidence in the strategy's win rate."
+            >
+              <select id="leverage" value={leverage} onChange={e => setLeverage(e.target.value)} className={inputClass}>
+                {LEVERAGE_OPTIONS.map(opt => (
+                  <option key={opt} value={opt}>{opt}×</option>
+                ))}
+              </select>
+            </SettingField>
+
+            <SettingField
+              id="dailyLossLimit"
+              label="Daily Loss Limit (%)"
+              description="If the bot's cumulative realised loss for the calendar day exceeds this percentage of the starting balance, it will stop opening new positions until midnight. This acts as a circuit breaker, capping the maximum drawdown you are exposed to in a single day. Set to 0 to disable."
+            >
+              <input id="dailyLossLimit" type="number" min="0" max="100" step="any" value={dailyLossLimit}
+                onChange={e => setDailyLossLimit(e.target.value)} placeholder="e.g. 5" className={inputClass} />
+            </SettingField>
+
+            <SettingField
+              id="startingBalance"
+              label="Starting Balance (USDT)"
+              description="The reference balance used to calculate P&L percentages and the daily loss limit. Set this to the USDT balance you had in your account when you started the bot. It does not transfer funds — it is a bookkeeping baseline only."
+            >
+              <input id="startingBalance" type="number" min="0" step="any" value={startingBalance}
+                onChange={e => setStartingBalance(e.target.value)} placeholder="e.g. 700" className={inputClass} />
+            </SettingField>
+
+          </div>
+        </section>
+
+        {/* ── Section 2: Order Placement ── */}
+        <section>
+          <SectionHeader
+            title="Order Placement"
+            description="Control where and when limit orders are placed relative to the 10-minute high. The bot places a short sell slightly above the current price. If the order is not filled quickly, it is cancelled and the offset is reduced to get closer to market price."
+          />
+          <div className="rounded-xl border border-[#1E2A3D] bg-[#111827] divide-y divide-[#1E2A3D] px-6">
+
+            <SettingField
+              id="currentOffset"
+              label="Current Offset (live)"
+              description="The offset currently being used by the running bot in real time. This is read-only — it reflects how the bot has adapted during the current session. It resets to the initial offset when the bot is restarted."
+            >
+              <div className="w-full rounded-lg border border-[#1E2A3D] bg-[#0D1421] px-3 py-2.5 text-sm text-[#94a3b8]">
+                {currentEntryOffset != null ? `$${currentEntryOffset}` : '—'}
+              </div>
+            </SettingField>
+
+            <SettingField
+              id="entryOffsetInitial"
+              label="Initial Offset ($)"
+              description="When the bot starts fresh (or after a fill), it places the first order this many dollars above the current price. A larger initial offset gives more room to confirm the high, but may mean fewer fills. Typical values are $100–$200."
+            >
+              <input id="entryOffsetInitial" type="number" min="0" step="any" value={entryOffsetInitial}
+                onChange={e => setEntryOffsetInitial(e.target.value)} placeholder="e.g. 150" className={inputClass} />
+            </SettingField>
+
+            <SettingField
+              id="entryOffsetStep"
+              label="Decrease Step ($)"
+              description="Each time an unfilled order is cancelled, the bot reduces the offset by this amount and places a new order closer to the current price. This allows the bot to gradually 'walk down' toward market price rather than waiting indefinitely at a fixed level."
+            >
+              <input id="entryOffsetStep" type="number" min="0" step="any" value={entryOffsetStep}
+                onChange={e => setEntryOffsetStep(e.target.value)} placeholder="e.g. 20" className={inputClass} />
+            </SettingField>
+
+            <SettingField
+              id="entryOffsetMin"
+              label="Minimum Offset ($)"
+              description="The offset will never decrease below this floor no matter how many cancellations have occurred. This prevents the bot from placing orders too close to market price, where slippage and noise can cause unwanted fills."
+            >
+              <input id="entryOffsetMin" type="number" min="0" step="any" value={entryOffsetMin}
+                onChange={e => setEntryOffsetMin(e.target.value)} placeholder="e.g. 50" className={inputClass} />
+            </SettingField>
+
+            <SettingField
+              id="orderCancelMinutes"
+              label="Cancel After (minutes)"
+              description="If a placed order has not been filled within this many minutes, the bot cancels it and places a new one at a lower offset. Shorter values make the bot more aggressive about chasing price; longer values give more time for price to come to the order."
+            >
+              <input id="orderCancelMinutes" type="number" min="1" step="1" value={orderCancelMinutes}
+                onChange={e => setOrderCancelMinutes(e.target.value)} placeholder="e.g. 10" className={inputClass} />
+            </SettingField>
+
+          </div>
+        </section>
+
+        {/* ── Section 3: Take Profit & Stop Loss ── */}
+        <section>
+          <SectionHeader
+            title="Take Profit & Stop Loss"
+            description="Once a short position is open, these settings define the two price levels the bot watches. The take profit closes the trade at a profit; the stop loss closes it to limit the loss. Both are expressed as a fixed dollar distance from the fill price."
+          />
+          <div className="rounded-xl border border-[#1E2A3D] bg-[#111827] divide-y divide-[#1E2A3D] px-6">
+
+            <SettingField
+              id="tpDistance"
+              label="Take Profit Distance ($)"
+              description="The bot places a take-profit order this many dollars below the entry fill price. For a short, profit is made when price falls. For example, if you entered at $85,000 with a TP distance of $50, the take-profit is set at $84,950. Smaller values mean quicker, smaller wins."
+            >
+              <input id="tpDistance" type="number" min="0" step="any" value={tpDistance}
+                onChange={e => setTpDistance(e.target.value)} placeholder="e.g. 50" className={inputClass} />
+            </SettingField>
+
+            <SettingField
+              id="slDistance"
+              label="Stop Loss Distance ($)"
+              description="The bot places a stop-loss order this many dollars above the entry fill price. If price moves against the short beyond this level, the position is closed to prevent further loss. For example, entry at $85,000 with SL distance of $200 closes the trade if price rises to $85,200."
+            >
+              <input id="slDistance" type="number" min="0" step="any" value={slDistance}
+                onChange={e => setSlDistance(e.target.value)} placeholder="e.g. 200" className={inputClass} />
+            </SettingField>
+
+          </div>
+        </section>
+
+        {/* ── Section 4: Market Filters ── */}
+        <section>
+          <SectionHeader
+            title="Market Filters"
+            description="Optional guards that prevent the bot from entering trades in unfavourable market conditions — flat markets with no clear direction, or highly volatile periods where price moves too fast to manage risk reliably. Leave blank to disable individual filters."
+          />
+          <div className="rounded-xl border border-[#1E2A3D] bg-[#111827] divide-y divide-[#1E2A3D] px-6">
+
+            <SettingField
+              id="minGapPct"
+              label="Minimum Gap Before Entry"
+              description="The current price must be at least this fraction below the 10-minute high before the bot will place an order. This ensures there is a meaningful gap between where price is now and the recent high, reducing the chance of entering on noise rather than a real pullback. Enter as a decimal — e.g. 0.001 means a 0.1% gap is required."
+            >
+              <input id="minGapPct" type="number" step="0.0001" value={minGapPct}
+                onChange={e => setMinGapPct(e.target.value)} placeholder="e.g. 0.001 (0.1%)" className={inputClass} />
+            </SettingField>
+
+            <SettingField
+              id="entryOffsetPct"
+              label="Entry Offset % (override)"
+              description="When set, the initial order offset is calculated as this percentage of the current BTC price rather than using the fixed dollar initial offset. This makes the offset self-adjusting as BTC price changes over time. For example, 0.002 at $85,000 gives an offset of $170. Leave blank to use the fixed initial offset instead."
+            >
+              <input id="entryOffsetPct" type="number" step="0.0001" value={entryOffsetPct}
+                onChange={e => setEntryOffsetPct(e.target.value)} placeholder="e.g. 0.002 (0.2%)" className={inputClass} />
+            </SettingField>
+
+            <SettingField
+              id="minImpulsePct"
+              label="Minimum Impulse Filter"
+              description="The 10-minute high must have risen at least this fraction above the opening price of the 10-minute window to confirm a genuine upward impulse. Without this filter, the bot can trigger on sideways-drifting markets where the 'high' is barely above the open. Enter as a decimal — e.g. 0.002 means the high must be at least 0.2% above the window open."
+            >
+              <input id="minImpulsePct" type="number" step="0.0001" value={minImpulsePct}
+                onChange={e => setMinImpulsePct(e.target.value)} placeholder="e.g. 0.002 (0.2%)" className={inputClass} />
+            </SettingField>
+
+            <SettingField
+              id="cancelCooldownMinutes"
+              label="Cancel Cooldown (minutes)"
+              description="After an order is cancelled (either because it expired or was manually stopped), the bot waits this many minutes before placing the next order. This prevents rapid-fire re-entry during choppy conditions where the bot keeps placing and cancelling. Set to 0 or leave blank to re-enter immediately."
+            >
+              <input id="cancelCooldownMinutes" type="number" step="1" value={cancelCooldownMinutes}
+                onChange={e => setCancelCooldownMinutes(e.target.value)} placeholder="e.g. 5" className={inputClass} />
+            </SettingField>
+
+            <SettingField
+              id="maxAtrUsdt"
+              label="ATR Volatility Halt (USDT)"
+              description="The 14-candle Average True Range (ATR) measures how many dollars BTC moves per candle on average. If the ATR exceeds this threshold, the bot pauses new entries until volatility settles. This prevents trading during news-driven spikes where stop-losses are easily hit. A typical value is $300–$500. Set to 0 or leave blank to disable this filter entirely."
+            >
+              <input id="maxAtrUsdt" type="number" step="1" value={maxAtrUsdt}
+                onChange={e => setMaxAtrUsdt(e.target.value)} placeholder="e.g. 300" className={inputClass} />
+            </SettingField>
+
+          </div>
+        </section>
+
+        {/* Bottom save button */}
+        <div className="flex justify-end gap-3 pb-8">
           <button
             onClick={onClose}
-            className="flex-1 min-h-[44px] rounded-md border border-[#1E2A3D] bg-[#1A2332] px-4 py-2 text-sm font-medium text-[#94a3b8] hover:bg-[#1E2A3D] transition-colors"
+            className="min-h-[44px] rounded-lg border border-[#1E2A3D] bg-[#1A2332] px-6 text-sm font-medium text-[#94a3b8] hover:bg-[#1E2A3D] transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex-1 min-h-[44px] rounded-md bg-[#1E7CF8] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            className="min-h-[44px] rounded-lg bg-[#1E7CF8] px-6 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
           >
-            {saving ? 'Saving...' : 'Save'}
+            {saving ? 'Saving…' : 'Save Settings'}
           </button>
         </div>
-      </aside>
-    </>
+
+      </div>
+    </div>
   );
 }
