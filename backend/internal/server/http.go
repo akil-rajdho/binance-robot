@@ -77,6 +77,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/deploy", s.handleDeploy)
 	s.mux.HandleFunc("/api/deploy/logs", s.handleDeployLogs)
 
+	// Protected deploy trigger — requires JWT (for dashboard button).
+	s.mux.HandleFunc("/api/deploy/run", s.handleDeployRun)
+
 	// Protected endpoints (covered by the auth middleware applied in Handler).
 	s.mux.HandleFunc("/ws", s.hub.HandleWS)
 	s.mux.HandleFunc("/api/status", s.handleStatus)
@@ -164,6 +167,69 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token != s.cfg.DeployToken {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	deployMu.Lock()
+	if deployRunning {
+		deployMu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]string{"status": "deploy already running"})
+		return
+	}
+	deployRunning = true
+	deployLines = []string{"[deploy] started at " + time.Now().Format(time.RFC3339)}
+	deployMu.Unlock()
+
+	pr, pw := io.Pipe()
+	cmd := exec.Command("sh", "-c", s.cfg.DeployScript)
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	if err := cmd.Start(); err != nil {
+		log.Printf("[Server] deploy script start error: %v", err)
+		pw.Close()
+		deployMu.Lock()
+		deployRunning = false
+		deployMu.Unlock()
+		writeError(w, http.StatusInternalServerError, "failed to start deploy")
+		return
+	}
+
+	go func() {
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			deployMu.Lock()
+			deployLines = append(deployLines, line)
+			deployMu.Unlock()
+		}
+	}()
+
+	go func() {
+		err := cmd.Wait()
+		pw.Close()
+		deployMu.Lock()
+		deployRunning = false
+		if err != nil {
+			deployLines = append(deployLines, "[deploy] exited with error: "+err.Error())
+		} else {
+			deployLines = append(deployLines, "[deploy] finished successfully")
+		}
+		deployMu.Unlock()
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deploy started"})
+}
+
+// POST /api/deploy/run — JWT-protected deploy trigger for the dashboard button.
+// Reuses the same deploy logic as the webhook endpoint without requiring the deploy token.
+func (s *Server) handleDeployRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.cfg.DeployScript == "" {
+		writeError(w, http.StatusNotFound, "deploy not configured")
 		return
 	}
 

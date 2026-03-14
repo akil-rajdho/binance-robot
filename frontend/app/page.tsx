@@ -117,9 +117,17 @@ export default function Home() {
               History
             </Link>
             <button
-              onClick={() => setDeployOpen(true)}
-              className="hidden md:inline-flex rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm font-medium text-[#94a3b8] transition-colors hover:bg-[#1E2A3D]"
+              onClick={() => {
+                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                fetch(`${DEPLOY_API_URL}/deploy/run`, { method: 'POST', headers }).catch(() => {});
+                setDeployLines([]);
+                setDeployOpen(true);
+              }}
+              disabled={deployRunning}
+              className="hidden md:inline-flex items-center gap-1.5 rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm font-medium text-[#94a3b8] transition-colors hover:bg-[#1E2A3D] disabled:opacity-50 disabled:cursor-not-allowed"
             >
+              {deployRunning && <span className="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />}
               Deploy
             </button>
             <button
