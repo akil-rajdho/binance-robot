@@ -91,7 +91,7 @@ export default function AlgorithmReasoning({ token, onActivity }: AlgorithmReaso
   useEffect(() => {
     let mounted = true;
 
-    const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+    const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
     const fetchAll = async () => {
       try {
