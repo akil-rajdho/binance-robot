@@ -42,15 +42,15 @@ services:
         condition: service_healthy
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_BACKEND_WS: wss://akil.cooleta.al/ws
+        NEXT_PUBLIC_BACKEND_API: https://akil.cooleta.al/api
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
-      # For local development:
-      # - NEXT_PUBLIC_BACKEND_WS=ws://localhost:8080/ws
-      # - NEXT_PUBLIC_BACKEND_API=http://localhost:8080/api
-      # For production with domain (update akil.cooleta.al to your domain):
       - NEXT_PUBLIC_BACKEND_WS=wss://akil.cooleta.al/ws
       - NEXT_PUBLIC_BACKEND_API=https://akil.cooleta.al/api
     depends_on:
