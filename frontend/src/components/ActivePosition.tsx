@@ -23,7 +23,7 @@ function formatCountdown(cancelAt: string): string {
 function PriceRow({ label, price, colorClass }: { label: string; price: number; colorClass: string }) {
   return (
     <div className="flex items-center justify-between text-sm">
-      <span className="text-gray-500">{label}</span>
+      <span className="text-[#94a3b8]">{label}</span>
       <span className={`font-mono font-semibold ${colorClass}`}>{formatPrice(price)}</span>
     </div>
   );
@@ -43,45 +43,45 @@ export default function ActivePosition({ algoState }: Props) {
     (algoState.state === 'ORDER_PLACED' || algoState.state === 'POSITION_OPEN');
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 flex flex-col gap-3">
+    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-700">
+        <h2 className="text-sm font-semibold text-[#e2e8f0]">
           {algoState?.state === 'ORDER_PLACED' ? 'Active Order' : 'Open Position'}
         </h2>
         {hasActive && (
-          <span className="inline-flex items-center rounded-full bg-red-50 border border-red-200 px-2.5 py-0.5 text-xs font-bold text-red-700">
+          <span className="inline-flex items-center rounded-full bg-red-900/30 border border-red-800 px-2.5 py-0.5 text-xs font-bold text-red-400">
             SHORT
           </span>
         )}
       </div>
 
       {!hasActive ? (
-        <p className="text-sm text-gray-400 py-2">No active position</p>
+        <p className="text-sm text-[#4b5563] py-2">No active position</p>
       ) : (
         <div className="space-y-3">
           {/* Price levels */}
-          <div className="bg-gray-50 rounded-md p-3 space-y-2">
+          <div className="bg-[#0D1421] rounded-md p-3 space-y-2">
             <PriceRow
               label={algoState.state === 'ORDER_PLACED' ? 'Order Price' : 'Entry Price'}
               price={algoState.activeOrderPrice}
-              colorClass="text-gray-800"
+              colorClass="text-white"
             />
-            <PriceRow label="Take Profit" price={algoState.tpPrice} colorClass="text-green-600" />
-            <PriceRow label="Stop Loss" price={algoState.slPrice} colorClass="text-red-500" />
+            <PriceRow label="Take Profit" price={algoState.tpPrice} colorClass="text-green-400" />
+            <PriceRow label="Stop Loss" price={algoState.slPrice} colorClass="text-red-400" />
           </div>
 
           {/* Distance indicators */}
           {algoState.tpPrice > 0 && algoState.slPrice > 0 && algoState.activeOrderPrice > 0 && (
-            <div className="text-xs text-gray-500 flex gap-3">
+            <div className="text-xs text-[#94a3b8] flex gap-3">
               <span>
                 TP dist:{' '}
-                <span className="text-green-600 font-medium">
+                <span className="text-green-400 font-medium">
                   {formatPrice(Math.abs(algoState.activeOrderPrice - algoState.tpPrice))}
                 </span>
               </span>
               <span>
                 SL dist:{' '}
-                <span className="text-red-500 font-medium">
+                <span className="text-red-400 font-medium">
                   {formatPrice(Math.abs(algoState.slPrice - algoState.activeOrderPrice))}
                 </span>
               </span>
@@ -90,9 +90,9 @@ export default function ActivePosition({ algoState }: Props) {
 
           {/* ORDER_PLACED countdown */}
           {algoState.state === 'ORDER_PLACED' && algoState.cancelAt && (
-            <div className="flex items-center gap-2 rounded-md bg-orange-50 border border-orange-100 px-3 py-2 text-sm">
-              <span className="text-orange-600">Cancels in</span>
-              <span className="font-mono font-bold text-orange-700">
+            <div className="flex items-center gap-2 rounded-md bg-yellow-900/20 border border-yellow-800 px-3 py-2 text-sm">
+              <span className="text-yellow-400">Cancels in</span>
+              <span className="font-mono font-bold text-orange-400">
                 {formatCountdown(algoState.cancelAt)}
               </span>
             </div>
@@ -100,9 +100,9 @@ export default function ActivePosition({ algoState }: Props) {
 
           {/* POSITION_OPEN unrealized P&L */}
           {algoState.state === 'POSITION_OPEN' && (
-            <div className="flex items-center justify-between rounded-md bg-gray-50 border border-gray-100 px-3 py-2 text-sm">
-              <span className="text-gray-500">Unrealized P&amp;L</span>
-              <span className="font-mono font-semibold text-gray-400">–</span>
+            <div className="flex items-center justify-between rounded-md bg-[#0D1421] border border-[#1E2A3D] px-3 py-2 text-sm">
+              <span className="text-[#94a3b8]">Unrealized P&amp;L</span>
+              <span className="font-mono font-semibold text-[#4b5563]">–</span>
             </div>
           )}
         </div>

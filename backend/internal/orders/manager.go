@@ -3,7 +3,10 @@ package orders
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
+	"github.com/bitcoin-robot/backend/internal/algorithm"
 	"github.com/bitcoin-robot/backend/internal/whitebit"
 )
 
@@ -24,26 +27,33 @@ func NewManager(client *whitebit.Client, market string) *Manager {
 // PlaceShortLimitOrder places a collateral limit sell order on the market.
 func (m *Manager) PlaceShortLimitOrder(_ context.Context, price float64, amount string) (orderID int64, err error) {
 	priceStr := fmt.Sprintf("%.2f", price)
-	result, err := m.client.PlaceCollateralLimitOrder(m.market, "sell", amount, priceStr)
+	result, err := m.client.PlaceCollateralLimitOrder(m.market, "sell", amount, priceStr, "")
 	if err != nil {
 		return 0, fmt.Errorf("orders: PlaceShortLimitOrder: %w", err)
 	}
 	return result.OrderID, nil
 }
 
-// CancelOrder cancels the order with the given ID on the market.
+// CancelOrder cancels an order by ID. It tries the regular collateral limit cancel first,
+// then falls back to the conditional cancel. This handles both entry/TP orders (regular limit)
+// and SL orders (conditional stop-limit) with a single call.
 func (m *Manager) CancelOrder(_ context.Context, orderID int64) error {
-	if err := m.client.CancelOrder(m.market, orderID); err != nil {
-		return fmt.Errorf("orders: CancelOrder %d: %w", orderID, err)
+	// Try regular collateral limit cancel first (entry order, TP order)
+	if err := m.client.CancelCollateralLimitOrder(m.market, orderID); err == nil {
+		return nil
 	}
-	return nil
+	// Fall back to conditional cancel (stop-loss order)
+	if err := m.client.CancelConditionalOrder(m.market, orderID); err == nil {
+		return nil
+	}
+	return fmt.Errorf("orders: CancelOrder %d: failed both regular and conditional cancel", orderID)
 }
 
 // PlaceTakeProfit places a limit BUY order to close a short position at the given price.
 // amount "0" signals WhiteBit to close the entire position.
 func (m *Manager) PlaceTakeProfit(_ context.Context, _ int64, price float64) (orderID int64, err error) {
 	priceStr := fmt.Sprintf("%.2f", price)
-	result, err := m.client.PlaceCollateralLimitOrder(m.market, "buy", "0", priceStr)
+	result, err := m.client.PlaceCollateralLimitOrder(m.market, "buy", "0", priceStr, "")
 	if err != nil {
 		return 0, fmt.Errorf("orders: PlaceTakeProfit: %w", err)
 	}
@@ -62,60 +72,99 @@ func (m *Manager) PlaceStopLoss(_ context.Context, _ int64, price float64) (orde
 	return result.OrderID, nil
 }
 
-// IsOrderFilled uses a two-step check to distinguish filled from cancelled orders:
-// 1. If the order is still in active orders → not filled yet.
-// 2. If the order appears in executed orders → filled, returns fill price.
-// 3. If absent from both → order was cancelled, returns filled=false.
-func (m *Manager) IsOrderFilled(_ context.Context, orderID int64) (filled bool, fillPrice float64, err error) {
-	activeOrders, err := m.client.GetActiveOrders(m.market)
+// IsOrderFilled checks if the entry order (regular collateral limit) has been filled.
+// Returns (filled, cancelled, fillPrice, error).
+// 1. If still in active collateral orders → filled=false, cancelled=false.
+// 2. If in execution history → filled=true, cancelled=false.
+// 3. Absent from both → filled=false, cancelled=true.
+func (m *Manager) IsOrderFilled(_ context.Context, orderID int64) (filled bool, cancelled bool, fillPrice float64, err error) {
+	activeOrders, err := m.client.GetActiveCollateralLimitOrders(m.market)
 	if err != nil {
-		return false, 0, fmt.Errorf("orders: IsOrderFilled GetActiveOrders: %w", err)
+		return false, false, 0, fmt.Errorf("orders: IsOrderFilled GetActiveCollateralLimitOrders: %w", err)
 	}
-
 	for _, o := range activeOrders {
 		if o.OrderID == orderID {
-			// Still active — not filled
-			return false, 0, nil
+			return false, false, 0, nil // still active
 		}
 	}
 
-	// Not in active orders — check execution history
+	// Not in active — check execution history
 	found, fp, execErr := m.client.GetExecutedOrder(m.market, orderID)
 	if execErr != nil {
-		return false, 0, fmt.Errorf("orders: IsOrderFilled GetExecutedOrder: %w", execErr)
+		return false, false, 0, fmt.Errorf("orders: IsOrderFilled GetExecutedOrder: %w", execErr)
 	}
 	if found {
-		return true, fp, nil
+		return true, false, fp, nil
 	}
 
-	// Not in active, not in executed — order was cancelled
-	return false, 0, nil
+	// Not in active, not in executed — was cancelled externally
+	return false, true, 0, nil
 }
 
-// IsOrderFilled2 is the simplified variant used for TP/SL checks.
-// Uses the same two-step check: active → executed → cancelled.
-func (m *Manager) IsOrderFilled2(_ context.Context, orderID int64) (filled bool, err error) {
-	activeOrders, err := m.client.GetActiveOrders(m.market)
+// PlaceMarketClose places a market buy order to close the entire short position.
+// amount "0" signals WhiteBit to close the full position.
+func (m *Manager) PlaceMarketClose(_ context.Context) (orderID int64, err error) {
+	result, err := m.client.PlaceCollateralMarketOrder(m.market, "buy", "0")
 	if err != nil {
-		return false, fmt.Errorf("orders: IsOrderFilled2 GetActiveOrders: %w", err)
+		return 0, fmt.Errorf("orders: PlaceMarketClose: %w", err)
 	}
+	return result.OrderID, nil
+}
 
-	for _, o := range activeOrders {
+// IsOrderFilled2 checks if a TP or SL order has been filled.
+// It checks both regular and conditional active orders, then execution history.
+func (m *Manager) IsOrderFilled2(_ context.Context, orderID int64) (filled bool, err error) {
+	// Check regular active orders (covers TP which is a collateral limit buy)
+	regularOrders, err := m.client.GetActiveCollateralLimitOrders(m.market)
+	if err != nil {
+		return false, fmt.Errorf("orders: IsOrderFilled2 GetActiveCollateralLimitOrders: %w", err)
+	}
+	for _, o := range regularOrders {
 		if o.OrderID == orderID {
-			// Still active — not filled
-			return false, nil
+			return false, nil // still active
 		}
 	}
 
-	// Not in active orders — check execution history
+	// Check conditional active orders (covers SL which is a stop-limit)
+	conditionalOrders, err := m.client.GetActiveConditionalOrders(m.market)
+	if err != nil {
+		return false, fmt.Errorf("orders: IsOrderFilled2 GetActiveConditionalOrders: %w", err)
+	}
+	for _, o := range conditionalOrders {
+		if o.OrderID == orderID {
+			return false, nil // still active
+		}
+	}
+
+	// Not in any active list — check execution history
 	found, _, execErr := m.client.GetExecutedOrder(m.market, orderID)
 	if execErr != nil {
 		return false, fmt.Errorf("orders: IsOrderFilled2 GetExecutedOrder: %w", execErr)
 	}
-	if found {
-		return true, nil
-	}
+	return found, nil
+}
 
-	// Not in active, not in executed — order was cancelled
-	return false, nil
+// GetActiveShortOrders returns all active sell orders for the market.
+// Used by the state machine to detect manually placed orders and prevent duplicate order placement.
+func (m *Manager) GetActiveShortOrders(_ context.Context) ([]algorithm.ActiveOrder, error) {
+	orders, err := m.client.GetActiveCollateralLimitOrders(m.market)
+	if err != nil {
+		return nil, fmt.Errorf("orders: GetActiveShortOrders: %w", err)
+	}
+	var active []algorithm.ActiveOrder
+	for _, o := range orders {
+		side := strings.ToLower(o.Side)
+		if side == "sell" {
+			price, parseErr := strconv.ParseFloat(o.Price, 64)
+			if parseErr != nil {
+				continue
+			}
+			active = append(active, algorithm.ActiveOrder{
+				OrderID: o.OrderID,
+				Price:   price,
+				Side:    side,
+			})
+		}
+	}
+	return active, nil
 }

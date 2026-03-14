@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/bitcoin-robot/backend/internal/algorithm"
 	"github.com/bitcoin-robot/backend/internal/database"
@@ -20,25 +22,29 @@ type DBStore interface {
 // BotController is the subset of the algorithm state machine the server needs.
 type BotController interface {
 	SetEnabled(enabled bool)
+	SyncOnEnable()
 	LoadConfig() error
 	GetAlgoState() algorithm.AlgoState
+	GetReasoningText() string
 }
 
 // Server is the HTTP/WebSocket API server for the dashboard.
 type Server struct {
-	hub *Hub
-	db  DBStore
-	sm  BotController
-	mux *http.ServeMux
+	hub        *Hub
+	db         DBStore
+	sm         BotController
+	mux        *http.ServeMux
+	hasAPIKeys bool
 }
 
 // NewServer constructs a Server and registers all routes.
-func NewServer(hub *Hub, db DBStore, sm BotController) *Server {
+func NewServer(hub *Hub, db DBStore, sm BotController, hasAPIKeys bool) *Server {
 	s := &Server{
-		hub: hub,
-		db:  db,
-		sm:  sm,
-		mux: http.NewServeMux(),
+		hub:        hub,
+		db:         db,
+		sm:         sm,
+		mux:        http.NewServeMux(),
+		hasAPIKeys: hasAPIKeys,
 	}
 	s.registerRoutes()
 	return s
@@ -57,6 +63,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/config", s.handleConfig)
 	s.mux.HandleFunc("/api/bot/start", s.handleBotStart)
 	s.mux.HandleFunc("/api/bot/stop", s.handleBotStop)
+	s.mux.HandleFunc("/api/reasoning", s.handleReasoning)
 }
 
 // corsMiddleware injects CORS headers and handles OPTIONS preflight requests.
@@ -89,23 +96,40 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// GET /api/status — returns the current AlgoState as JSON.
+// GET /api/status — returns the current AlgoState plus hasApiKeys flag.
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.sm.GetAlgoState())
+	type statusResponse struct {
+		algorithm.AlgoState
+		HasAPIKeys bool `json:"hasApiKeys"`
+	}
+	writeJSON(w, http.StatusOK, statusResponse{
+		AlgoState:  s.sm.GetAlgoState(),
+		HasAPIKeys: s.hasAPIKeys,
+	})
 }
 
-// GET /api/trades — returns the last 50 trades.
+// GET /api/trades — returns trades. Accepts ?limit=N (default 50, 0 = all).
 func (s *Server) handleTrades(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
-	trades, err := s.db.GetTrades(50)
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			limit = n
+		}
+	}
+	if limit == 0 {
+		limit = 10000 // effectively all
+	}
+
+	trades, err := s.db.GetTrades(limit)
 	if err != nil {
 		log.Printf("[Server] GetTrades error: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to retrieve trades")
@@ -159,13 +183,14 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// POST /api/bot/start — enables the bot.
+// POST /api/bot/start — enables the bot and syncs any open/manual orders.
 func (s *Server) handleBotStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	s.sm.SetEnabled(true)
+	go s.sm.SyncOnEnable() // check DB + WhiteBit for existing orders in background
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -177,4 +202,18 @@ func (s *Server) handleBotStop(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sm.SetEnabled(false)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// GET /api/reasoning — returns a plain-English description of what the algorithm is doing.
+func (s *Server) handleReasoning(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	state := s.sm.GetAlgoState()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"text":      s.sm.GetReasoningText(),
+		"state":     state.State,
+		"timestamp": time.Now(),
+	})
 }

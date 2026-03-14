@@ -1,11 +1,39 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bitcoin
+      POSTGRES_PASSWORD: bitcoin
+      POSTGRES_DB: bitcoinrobot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bitcoin -d bitcoinrobot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   backend:
     build: ./backend
     ports:
       - "8080:8080"
     env_file: .env
-    volumes:
-      - ./data:/data
+    environment:
+      - POSTGRES_DSN=postgres://bitcoin:bitcoin@postgres:5432/bitcoinrobot?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
@@ -19,3 +47,6 @@ services:
       - NEXT_PUBLIC_BACKEND_API=http://localhost:8080/api
     depends_on:
       - backend
+
+volumes:
+  pgdata:

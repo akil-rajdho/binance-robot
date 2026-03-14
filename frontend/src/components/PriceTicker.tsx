@@ -43,18 +43,18 @@ export default function PriceTicker({
       ? 'text-green-500'
       : priceDirection === 'down'
       ? 'text-red-500'
-      : 'text-gray-400';
+      : 'text-[#4b5563]';
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 flex flex-col gap-2">
+    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-4 flex flex-col gap-2">
       {/* Top row: connection status */}
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">BTC/USDT</span>
+        <span className="text-xs font-medium text-[#94a3b8] uppercase tracking-wide">BTC/USDT</span>
         <div className="flex items-center gap-1.5">
           <span
             className={`inline-block w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}
           />
-          <span className={`text-xs ${connected ? 'text-green-600' : 'text-red-500'}`}>
+          <span className={`text-xs ${connected ? 'text-green-400' : 'text-red-400'}`}>
             {connected ? 'Live' : 'Disconnected'}
           </span>
         </div>
@@ -62,32 +62,32 @@ export default function PriceTicker({
 
       {/* Price row */}
       <div className="flex items-baseline gap-2">
-        <span className="text-3xl font-bold text-gray-900 tabular-nums">
+        <span className="text-3xl font-bold text-white tabular-nums">
           {formatPrice(currentPrice)}
         </span>
         <span className={`text-lg font-semibold ${directionColor}`}>{directionArrow}</span>
       </div>
 
       {/* 10m high */}
-      <div className="text-sm text-gray-500">
-        <span className="font-medium text-gray-700">10m High:</span>{' '}
+      <div className="text-sm text-[#94a3b8]">
+        <span className="font-medium text-[#e2e8f0]">10m High:</span>{' '}
         <span className="tabular-nums">{formatPrice(high10min)}</span>
       </div>
 
       {/* Condition status */}
       <div className="flex items-center gap-2 flex-wrap">
         {conditionMet ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-semibold text-green-700 border border-green-200">
+          <span className="inline-flex items-center gap-1 rounded-full bg-green-900/30 px-2.5 py-0.5 text-xs font-semibold text-green-400 border border-green-800">
             ✓ CONDITION MET
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-500 border border-gray-200">
+          <span className="inline-flex items-center gap-1 rounded-full bg-gray-800 px-2.5 py-0.5 text-xs font-semibold text-gray-400 border border-[#1E2A3D]">
             ✗ NOT MET
           </span>
         )}
 
         {!botEnabled && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-yellow-50 px-2.5 py-0.5 text-xs font-semibold text-yellow-700 border border-yellow-200">
+          <span className="inline-flex items-center gap-1 rounded-full bg-yellow-900/30 px-2.5 py-0.5 text-xs font-semibold text-yellow-400 border border-yellow-800">
             BOT DISABLED
           </span>
         )}
@@ -95,9 +95,9 @@ export default function PriceTicker({
 
       {/* Next order price */}
       {conditionMet && nextOrderPrice > 0 && (
-        <div className="text-sm text-gray-600">
+        <div className="text-sm text-[#94a3b8]">
           <span className="font-medium">Next:</span>{' '}
-          <span className="font-semibold text-orange-600">
+          <span className="font-semibold text-orange-400">
             SHORT @ {formatPrice(nextOrderPrice)}
           </span>
         </div>

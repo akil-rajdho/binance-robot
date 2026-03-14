@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -14,12 +15,12 @@ const wsURL = "wss://api.whitebit.com/ws"
 
 // Candle represents a single OHLCV candlestick.
 type Candle struct {
-	Time   int64   // Unix timestamp
-	Open   float64
-	High   float64
-	Low    float64
-	Close  float64
-	Volume float64
+	Time   int64   `json:"time"`
+	Open   float64 `json:"open"`
+	High   float64 `json:"high"`
+	Low    float64 `json:"low"`
+	Close  float64 `json:"close"`
+	Volume float64 `json:"volume"`
 }
 
 // PriceFeed subscribes to WhiteBit WebSocket price updates for a configurable
@@ -89,12 +90,13 @@ func (f *PriceFeed) runConnection(ctx context.Context) error {
 		return fmt.Errorf("dial: %w", err)
 	}
 	defer conn.Close()
+	log.Printf("[Feed] Connected to %s", wsURL)
 
-	// Subscribe to candles for the configured market and interval.
+	// Subscribe to 1-minute candles (interval=60 seconds, as integer).
 	if err := conn.WriteJSON(map[string]interface{}{
 		"id":     1,
 		"method": "candles_subscribe",
-		"params": []interface{}{f.market, f.interval},
+		"params": []interface{}{f.market, 60},
 	}); err != nil {
 		return fmt.Errorf("subscribe candles: %w", err)
 	}
@@ -162,27 +164,33 @@ func (f *PriceFeed) handleMessage(msg wsMessage) {
 		f.handleCandlesUpdate(msg.Params)
 	case "lastprice_update":
 		f.handleLastPriceUpdate(msg.Params)
-	// Ignore: pong, subscription confirmations, and unknown methods.
+	case "":
+		// Subscription confirmation or pong (no method field) — ignore.
+	default:
+		log.Printf("[Feed] unhandled method: %q params: %s", msg.Method, msg.Params)
 	}
 }
 
 // handleCandlesUpdate parses a candles_update params payload.
 //
-// The payload is an array of candle arrays; each candle array has the form:
+// WhiteBit format: ["MARKET", [[time, open, close, high, low, volume, ...], ...]]
+// index 0 → market name (string, skipped)
+// index 1 → array of candle arrays, each: [time, open, close, high, low, vol, ...]
 //
-//	[time, open, close, high, low, volume, ...]
-//
-// index 0 → Time, 1 → Open, 2 → Close, 3 → High, 4 → Low, 5 → Volume
-//
+// Within each candle: index 0→Time, 1→Open, 2→Close, 3→High, 4→Low, 5→Volume
 // Fields may arrive as JSON numbers or quoted strings — parseFloat handles both.
 func (f *PriceFeed) handleCandlesUpdate(raw json.RawMessage) {
 	if f.OnCandle == nil {
 		return
 	}
 
-	// params is: [[time, open, close, high, low, volume, ...], ...]
+	// params is: ["MARKET", [[candle...], ...]]
+	var outer []json.RawMessage
+	if err := json.Unmarshal(raw, &outer); err != nil || len(outer) < 2 {
+		return
+	}
 	var candleArrays [][]json.RawMessage
-	if err := json.Unmarshal(raw, &candleArrays); err != nil {
+	if err := json.Unmarshal(outer[1], &candleArrays); err != nil {
 		return
 	}
 
@@ -227,6 +235,7 @@ func (f *PriceFeed) handleLastPriceUpdate(raw json.RawMessage) {
 	if err != nil {
 		return
 	}
+	log.Printf("[Feed] lastprice_update: %.2f", price)
 	f.OnLastPrice(price)
 }
 

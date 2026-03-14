@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 	"github.com/bitcoin-robot/backend/internal/orders"
 	"github.com/bitcoin-robot/backend/internal/server"
 	"github.com/bitcoin-robot/backend/internal/whitebit"
+	"github.com/gorilla/websocket"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -25,7 +28,7 @@ func main() {
 	}
 
 	// 2. Open database
-	db, err := database.New(cfg.DBPath)
+	db, err := database.New(cfg.PostgresDSN)
 	if err != nil {
 		log.Fatal("database:", err)
 	}
@@ -46,6 +49,13 @@ func main() {
 	sm := algorithm.NewStateMachine(priceWindow, orderMgr, db)
 	sm.OnStateChange = func(state algorithm.AlgoState) {
 		hub.BroadcastJSON("algo_state", state)
+		hub.BroadcastJSON("order_update", nil) // triggers trade list refresh in the dashboard
+	}
+
+	// Push current algo state to each new WebSocket client immediately on connect.
+	hub.OnConnect = func(conn *websocket.Conn) {
+		state := sm.GetAlgoState()
+		_ = conn.WriteJSON(server.Message{Type: "algo_state", Data: state})
 	}
 
 	// 8. Load config into state machine
@@ -53,18 +63,87 @@ func main() {
 		log.Printf("warn: failed to load config into state machine: %v", err)
 	}
 
-	// 9. Create price feed
+	// 8b. Recover any open trades from a previous server run.
+	log.Println("[Startup] Checking for open trades to recover...")
+	if err := sm.RecoverOpenTrades(context.Background()); err != nil {
+		log.Printf("[Startup] Warning: trade recovery failed: %v", err)
+	}
+
+	// 8a. Seed price window and cache historical candles for the chart.
+	historicalCandles, err := wbClient.GetKlines("BTC_PERP", 60, 200)
+	if err != nil {
+		log.Printf("warn: failed to fetch historical klines: %v", err)
+	} else {
+		log.Printf("[Startup] Loaded %d historical candles", len(historicalCandles))
+		cutoff := time.Now().Add(-10 * time.Minute)
+		for _, c := range historicalCandles {
+			if time.Unix(c.Time, 0).After(cutoff) {
+				priceWindow.Add(c.Close)
+				sm.OnCandle(c.High, c.Low, c.Close, time.Unix(c.Time, 0))
+			}
+		}
+		// Store candles for new connections (broadcast on connect in OnConnect below)
+		cachedCandles := historicalCandles
+		originalOnConnect := hub.OnConnect
+		hub.OnConnect = func(conn *websocket.Conn) {
+			for _, c := range cachedCandles {
+				_ = conn.WriteJSON(server.Message{Type: "candle", Data: c})
+			}
+			if originalOnConnect != nil {
+				originalOnConnect(conn)
+			}
+		}
+	}
+
+	// 9. Connect to Redis
+	redisOpts, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		log.Printf("warn: failed to parse Redis URL %q: %v — price caching disabled", cfg.RedisURL, err)
+		redisOpts = nil
+	}
+	var rdb *redis.Client
+	if redisOpts != nil {
+		rdb = redis.NewClient(redisOpts)
+		rCtx, rCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if pingErr := rdb.Ping(rCtx).Err(); pingErr != nil {
+			log.Printf("warn: Redis ping failed: %v — price caching disabled", pingErr)
+			rdb = nil
+		}
+		rCancel()
+	}
+
+	// Wire Redis price cache into OnConnect so new clients get the latest price instantly.
+	if rdb != nil {
+		prevOnConnect := hub.OnConnect
+		hub.OnConnect = func(conn *websocket.Conn) {
+			if prevOnConnect != nil {
+				prevOnConnect(conn)
+			}
+			if val, err := rdb.Get(context.Background(), "btc:price").Result(); err == nil {
+				if price, err := strconv.ParseFloat(val, 64); err == nil {
+					_ = conn.WriteJSON(server.Message{Type: "price_tick", Data: map[string]float64{"price": price}})
+				}
+			}
+		}
+	}
+
+	// 10. Create price feed
 	priceFeed := whitebit.NewPriceFeed("BTC_PERP", "1", func(candle whitebit.Candle) {
 		hub.BroadcastJSON("candle", candle)
+		sm.OnCandle(candle.High, candle.Low, candle.Close, time.Unix(candle.Time, 0))
 	}, func(price float64) {
 		hub.BroadcastJSON("price_tick", map[string]float64{"price": price})
 		sm.OnPrice(price)
+		// Cache latest price in Redis
+		if rdb != nil {
+			rdb.Set(context.Background(), "btc:price", strconv.FormatFloat(price, 'f', -1, 64), 10*time.Minute)
+		}
 	})
 
-	// 10. Create HTTP server
-	httpServer := server.NewServer(hub, db, sm)
+	// 11. Create HTTP server
+	httpServer := server.NewServer(hub, db, sm, cfg.WhitebitAPIKey != "" && cfg.WhitebitAPISecret != "")
 
-	// 11. Start everything
+	// 12. Start everything
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

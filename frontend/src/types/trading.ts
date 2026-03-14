@@ -8,6 +8,7 @@ export interface AlgoState {
   high10min: number;
   conditionMet: boolean;
   nextOrderPrice: number;
+  entryOffset: number; // current offset above price used for order placement
   activeOrderId: number;
   activeOrderPrice: number;
   tpPrice: number;
@@ -87,4 +88,15 @@ export interface BotSettings {
   daily_loss_limit_pct: string;
   bot_enabled: string;
   starting_balance: string;
+  entry_offset_initial: string;
+  entry_offset_step: string;
+  entry_offset_min: string;
+  order_cancel_minutes: string;
+  tp_distance: string;
+  sl_distance: string;
+  min_gap_pct: string;
+  cancel_cooldown_minutes: string;
+  entry_offset_pct: string;
+  min_impulse_pct: string;
+  max_atr_usdt: string;
 }

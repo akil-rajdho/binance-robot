@@ -3,13 +3,13 @@
 import { useEffect, useRef } from 'react';
 import {
   createChart,
-  CandlestickSeries,
+  AreaSeries,
   LineSeries,
   LineStyle,
   UTCTimestamp,
   IChartApi,
   ISeriesApi,
-  CandlestickData,
+  AreaData,
   LineData,
 } from 'lightweight-charts';
 import { Candle, Trade } from '../types/trading';
@@ -23,7 +23,7 @@ interface Props {
 export default function PriceChart({ candles, high10min, trades }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const areaSeriesRef = useRef<ISeriesApi<'Area'> | null>(null);
   const lineSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
 
   // Initialize chart once
@@ -32,40 +32,48 @@ export default function PriceChart({ candles, high10min, trades }: Props) {
 
     const chart = createChart(containerRef.current, {
       layout: {
-        background: { color: '#ffffff' },
-        textColor: '#374151',
+        background: { color: '#0A0F1C' },
+        textColor: '#4b6280',
       },
       grid: {
-        vertLines: { color: '#f0f0f0' },
-        horzLines: { color: '#f0f0f0' },
+        vertLines: { color: 'transparent' },
+        horzLines: { color: '#1E2A3D' },
       },
       width: containerRef.current.clientWidth,
       height: 300,
       rightPriceScale: {
-        borderColor: '#e5e7eb',
+        borderColor: 'transparent',
+        textColor: '#4b6280',
       },
       timeScale: {
-        borderColor: '#e5e7eb',
+        borderColor: 'transparent',
         timeVisible: true,
         secondsVisible: false,
+        fixLeftEdge: true,
       },
       crosshair: {
-        vertLine: { color: '#9ca3af', style: LineStyle.Dashed },
-        horzLine: { color: '#9ca3af', style: LineStyle.Dashed },
+        vertLine: { color: '#1E7CF8', style: LineStyle.Dashed, width: 1, labelBackgroundColor: '#1E7CF8' },
+        horzLine: { color: '#1E7CF8', style: LineStyle.Dashed, width: 1, labelBackgroundColor: '#1E7CF8' },
       },
     });
 
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#22c55e',
-      downColor: '#ef4444',
-      borderUpColor: '#16a34a',
-      borderDownColor: '#dc2626',
-      wickUpColor: '#16a34a',
-      wickDownColor: '#dc2626',
+    // POK-style glowing blue area series
+    const areaSeries = chart.addSeries(AreaSeries, {
+      lineColor: '#1E7CF8',
+      lineWidth: 2,
+      topColor: 'rgba(30, 124, 248, 0.35)',
+      bottomColor: 'rgba(30, 124, 248, 0.00)',
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: true,
+      crosshairMarkerRadius: 4,
+      crosshairMarkerBorderColor: '#1E7CF8',
+      crosshairMarkerBackgroundColor: '#ffffff',
     });
 
+    // 10m high reference line
     const lineSeries = chart.addSeries(LineSeries, {
-      color: '#3b82f6',
+      color: 'rgba(148, 163, 184, 0.5)',
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
@@ -74,14 +82,13 @@ export default function PriceChart({ candles, high10min, trades }: Props) {
     });
 
     chartRef.current = chart;
-    candleSeriesRef.current = candleSeries;
+    areaSeriesRef.current = areaSeries;
     lineSeriesRef.current = lineSeries;
 
-    // ResizeObserver for responsive width
+    // Responsive width
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        const { width } = entry.contentRect;
-        chart.applyOptions({ width });
+        chart.applyOptions({ width: entry.contentRect.width });
       }
     });
     resizeObserver.observe(containerRef.current);
@@ -90,27 +97,26 @@ export default function PriceChart({ candles, high10min, trades }: Props) {
       resizeObserver.disconnect();
       chart.remove();
       chartRef.current = null;
-      candleSeriesRef.current = null;
+      areaSeriesRef.current = null;
       lineSeriesRef.current = null;
     };
   }, []);
 
-  // Update candle data when prop changes
+  // Update area data (close prices) when candles change
   useEffect(() => {
-    if (!candleSeriesRef.current || candles.length === 0) return;
+    if (!areaSeriesRef.current || candles.length === 0) return;
 
-    const data: CandlestickData<UTCTimestamp>[] = candles.map((c) => ({
+    const data: AreaData<UTCTimestamp>[] = candles.map((c) => ({
       time: c.time as UTCTimestamp,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
+      value: c.close,
     }));
 
-    candleSeriesRef.current.setData(data);
+    areaSeriesRef.current.setData(data);
+    // Scroll to the latest candle so the chart doesn't appear shifted right on load/navigation
+    chartRef.current?.timeScale().scrollToRealTime();
   }, [candles]);
 
-  // Update 10-min high line when high10min or candles change
+  // Update 10-min high line
   useEffect(() => {
     if (!lineSeriesRef.current || candles.length === 0 || high10min <= 0) return;
 
@@ -125,17 +131,12 @@ export default function PriceChart({ candles, high10min, trades }: Props) {
     lineSeriesRef.current.setData(lineData);
   }, [high10min, candles]);
 
-  // Trade markers — use createSeriesMarkers if needed; for simplicity add price lines
+  // Entry price lines for open trades
   useEffect(() => {
-    if (!candleSeriesRef.current) return;
-    // Remove existing price lines and re-add for each open trade entry
-    // We cannot remove all price lines directly, but we can set markers
-    // For now, entry markers are shown as price lines on the candle series
-    const series = candleSeriesRef.current;
-    // Remove old price lines by tracking them — simplified approach
+    if (!areaSeriesRef.current) return;
     trades.forEach((trade) => {
       if (trade.status === 'OPEN') {
-        series.createPriceLine({
+        areaSeriesRef.current!.createPriceLine({
           price: trade.entryPrice || trade.orderPrice,
           color: '#f97316',
           lineWidth: 1,
@@ -148,14 +149,24 @@ export default function PriceChart({ candles, high10min, trades }: Props) {
   }, [trades]);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
+    <div className="rounded-xl border border-[#1E2A3D] bg-[#0A0F1C] p-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold text-gray-700">BTC/USDT</h2>
-        <div className="flex items-center gap-3 text-xs text-gray-500">
-          <span className="flex items-center gap-1">
-            <span className="inline-block w-3 h-0.5 bg-blue-400" style={{ borderTop: '2px dashed #3b82f6' }} />
-            10m High
-          </span>
+        <div>
+          <h2 className="text-sm font-semibold text-white">BTC / USDT</h2>
+          {candles.length > 0 && (
+            <p className="text-xs text-[#94a3b8] mt-0.5">
+              {new Date(candles[candles.length - 1].time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-4 text-xs text-[#94a3b8]">
+          {high10min > 0 && (
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block w-4 border-t border-dashed border-[#94a3b8]/50" />
+              10m High
+              <span className="text-[#e2e8f0] font-medium">${high10min.toLocaleString()}</span>
+            </span>
+          )}
         </div>
       </div>
       <div ref={containerRef} className="w-full" />

@@ -26,17 +26,17 @@ function formatPnl(pnl?: number): string {
 }
 
 function pnlColor(pnl?: number): string {
-  if (pnl === undefined || pnl === null) return 'text-gray-400';
-  if (pnl > 0) return 'text-green-600';
-  if (pnl < 0) return 'text-red-600';
-  return 'text-gray-600';
+  if (pnl === undefined || pnl === null) return 'text-[#4b5563]';
+  if (pnl > 0) return 'text-green-400';
+  if (pnl < 0) return 'text-red-400';
+  return 'text-[#94a3b8]';
 }
 
 const STATUS_STYLES: Record<Trade['status'], string> = {
-  TP_HIT: 'bg-green-50 text-green-700 border-green-200',
-  SL_HIT: 'bg-red-50 text-red-700 border-red-200',
-  CANCELLED: 'bg-gray-100 text-gray-500 border-gray-200',
-  OPEN: 'bg-blue-50 text-blue-700 border-blue-200',
+  TP_HIT: 'bg-green-900/30 text-green-400 border-green-800',
+  SL_HIT: 'bg-red-900/30 text-red-400 border-red-800',
+  CANCELLED: 'bg-gray-800 text-gray-400 border-[#1E2A3D]',
+  OPEN: 'bg-blue-900/30 text-blue-400 border-blue-800',
 };
 
 const STATUS_LABELS: Record<Trade['status'], string> = {
@@ -50,45 +50,45 @@ export default function OrderHistory({ trades, onWhyClick }: Props) {
   const displayTrades = trades.slice(0, 20);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 flex flex-col gap-3">
+    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-700">Order History</h2>
+        <h2 className="text-sm font-semibold text-[#e2e8f0]">Order History</h2>
         {trades.length > 20 && (
-          <span className="text-xs text-gray-400">Showing 20 of {trades.length}</span>
+          <span className="text-xs text-[#4b5563]">Showing 20 of {trades.length}</span>
         )}
       </div>
 
       {displayTrades.length === 0 ? (
-        <p className="text-sm text-gray-400 py-3 text-center">No trades yet</p>
+        <p className="text-sm text-[#4b5563] py-3 text-center">No trades yet</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left py-2 pr-3 text-xs font-medium text-gray-500 whitespace-nowrap">Time</th>
-                <th className="text-left py-2 pr-3 text-xs font-medium text-gray-500">Side</th>
-                <th className="text-right py-2 pr-3 text-xs font-medium text-gray-500">Entry</th>
-                <th className="text-right py-2 pr-3 text-xs font-medium text-gray-500">Exit</th>
-                <th className="text-right py-2 pr-3 text-xs font-medium text-gray-500">P&amp;L</th>
-                <th className="text-left py-2 pr-3 text-xs font-medium text-gray-500">Status</th>
-                <th className="py-2 text-xs font-medium text-gray-500"></th>
+              <tr className="border-b border-[#1E2A3D]">
+                <th className="text-left py-2 pr-3 text-xs font-medium text-[#94a3b8] whitespace-nowrap">Time</th>
+                <th className="text-left py-2 pr-3 text-xs font-medium text-[#94a3b8]">Side</th>
+                <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">Entry</th>
+                <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">Exit</th>
+                <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">P&amp;L</th>
+                <th className="text-left py-2 pr-3 text-xs font-medium text-[#94a3b8]">Status</th>
+                <th className="py-2 text-xs font-medium text-[#94a3b8]"></th>
               </tr>
             </thead>
             <tbody>
               {displayTrades.map((trade) => (
-                <tr key={trade.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
-                  <td className="py-2 pr-3 text-gray-500 tabular-nums whitespace-nowrap font-mono text-xs">
+                <tr key={trade.id} className="border-b border-[#1E2A3D]/50 hover:bg-[#1A2332]/50 transition-colors">
+                  <td className="py-2 pr-3 text-[#94a3b8] tabular-nums whitespace-nowrap font-mono text-xs">
                     {formatTime(trade.entryTime)}
                   </td>
                   <td className="py-2 pr-3">
-                    <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
+                    <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-semibold bg-red-900/30 text-red-400 border border-red-800">
                       SHORT
                     </span>
                   </td>
-                  <td className="py-2 pr-3 text-right font-mono text-gray-700 whitespace-nowrap">
+                  <td className="py-2 pr-3 text-right font-mono text-[#e2e8f0] whitespace-nowrap">
                     {formatPrice(trade.entryPrice || trade.orderPrice)}
                   </td>
-                  <td className="py-2 pr-3 text-right font-mono text-gray-500 whitespace-nowrap">
+                  <td className="py-2 pr-3 text-right font-mono text-[#94a3b8] whitespace-nowrap">
                     {trade.exitPrice !== undefined && trade.exitPrice !== null
                       ? formatPrice(trade.exitPrice)
                       : '–'}
@@ -106,7 +106,7 @@ export default function OrderHistory({ trades, onWhyClick }: Props) {
                   <td className="py-2">
                     <button
                       onClick={() => onWhyClick(trade)}
-                      className="text-xs font-medium text-blue-500 hover:text-blue-700 hover:underline transition-colors whitespace-nowrap"
+                      className="text-xs font-medium text-[#1E7CF8] hover:text-blue-400 hover:underline transition-colors whitespace-nowrap"
                     >
                       Why?
                     </button>

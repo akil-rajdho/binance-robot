@@ -10,7 +10,8 @@ import (
 type Config struct {
 	WhitebitAPIKey    string
 	WhitebitAPISecret string
-	DBPath            string
+	PostgresDSN       string
+	RedisURL          string
 	Port              string
 }
 
@@ -21,7 +22,8 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		WhitebitAPIKey:    os.Getenv("WHITEBIT_API_KEY"),
 		WhitebitAPISecret: os.Getenv("WHITEBIT_API_SECRET"),
-		DBPath:            os.Getenv("DB_PATH"),
+		PostgresDSN:       os.Getenv("POSTGRES_DSN"),
+		RedisURL:          os.Getenv("REDIS_URL"),
 		Port:              os.Getenv("PORT"),
 	}
 
@@ -32,8 +34,11 @@ func Load() (*Config, error) {
 		return nil, errors.New("WHITEBIT_API_SECRET is required")
 	}
 
-	if cfg.DBPath == "" {
-		cfg.DBPath = "/data/bitcoin-robot.db"
+	if cfg.PostgresDSN == "" {
+		cfg.PostgresDSN = "postgres://bitcoin:bitcoin@localhost:5432/bitcoinrobot?sslmode=disable"
+	}
+	if cfg.RedisURL == "" {
+		cfg.RedisURL = "redis://localhost:6379"
 	}
 	if cfg.Port == "" {
 		cfg.Port = "8080"

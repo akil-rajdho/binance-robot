@@ -119,7 +119,12 @@ export function useTrading(): TradingState & {
         algoState.state === 'POSITION_OPEN'
           ? buildActiveTrade(algoState)
           : null;
-      setState((prev) => ({ ...prev, algoState, activeTrade }));
+      setState((prev) => ({
+        ...prev,
+        algoState,
+        activeTrade,
+        currentPrice: algoState.currentPrice > 0 ? algoState.currentPrice : prev.currentPrice,
+      }));
     } catch {
       // network errors are non-fatal
     }
@@ -139,6 +144,9 @@ export function useTrading(): TradingState & {
         return;
       }
       setState((prev) => ({ ...prev, connected: true }));
+      // Refresh data on every (re)connect in case events were missed while disconnected
+      void fetchTrades();
+      void fetchStatus();
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -187,7 +195,12 @@ export function useTrading(): TradingState & {
             algoState.state === 'POSITION_OPEN'
               ? buildActiveTrade(algoState)
               : null;
-          setState((prev) => ({ ...prev, algoState, activeTrade }));
+          setState((prev) => ({
+            ...prev,
+            algoState,
+            activeTrade,
+            currentPrice: algoState.currentPrice > 0 ? algoState.currentPrice : prev.currentPrice,
+          }));
           break;
         }
 

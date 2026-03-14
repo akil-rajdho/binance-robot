@@ -13,15 +13,15 @@ function formatPnl(value: number): string {
 }
 
 function pnlColor(value: number): string {
-  if (value > 0) return 'text-green-600';
-  if (value < 0) return 'text-red-600';
-  return 'text-gray-700';
+  if (value > 0) return 'text-green-400';
+  if (value < 0) return 'text-red-400';
+  return 'text-[#e2e8f0]';
 }
 
 function pnlBg(value: number): string {
-  if (value > 0) return 'bg-green-50 border-green-100';
-  if (value < 0) return 'bg-red-50 border-red-100';
-  return 'bg-gray-50 border-gray-100';
+  if (value > 0) return 'bg-green-900/30 border-green-800';
+  if (value < 0) return 'bg-red-900/30 border-red-800';
+  return 'bg-[#0D1421] border-[#1E2A3D]';
 }
 
 interface StatCardProps {
@@ -31,10 +31,10 @@ interface StatCardProps {
   bgClass?: string;
 }
 
-function StatCard({ label, value, valueClass = 'text-gray-800', bgClass = 'bg-gray-50 border-gray-100' }: StatCardProps) {
+function StatCard({ label, value, valueClass = 'text-[#e2e8f0]', bgClass = 'bg-[#0D1421] border-[#1E2A3D]' }: StatCardProps) {
   return (
     <div className={`rounded-md border p-3 flex flex-col gap-1 ${bgClass}`}>
-      <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</span>
+      <span className="text-xs font-medium text-[#94a3b8] uppercase tracking-wide">{label}</span>
       <span className={`text-xl font-bold tabular-nums ${valueClass}`}>{value}</span>
     </div>
   );
@@ -45,8 +45,8 @@ export default function PnlSummary({ todayPnl, totalPnl, winRate, tradeCount }: 
   const winRatePct = (winRate * 100).toFixed(0);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 flex flex-col gap-3">
-      <h2 className="text-sm font-semibold text-gray-700">P&amp;L Summary</h2>
+    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-4 flex flex-col gap-3">
+      <h2 className="text-sm font-semibold text-[#e2e8f0]">P&amp;L Summary</h2>
       <div className="grid grid-cols-2 gap-2">
         <StatCard
           label="Today P&L"
@@ -63,14 +63,14 @@ export default function PnlSummary({ todayPnl, totalPnl, winRate, tradeCount }: 
         <StatCard
           label="Win Rate"
           value={`${winRatePct}%`}
-          valueClass={winRate >= 0.5 ? 'text-green-600' : 'text-red-500'}
-          bgClass={winRate >= 0.5 ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}
+          valueClass={winRate >= 0.5 ? 'text-green-400' : 'text-red-400'}
+          bgClass={winRate >= 0.5 ? 'bg-green-900/30 border-green-800' : 'bg-red-900/30 border-red-800'}
         />
         <StatCard
           label="Trades"
           value={`${winCount}/${tradeCount}`}
-          valueClass="text-gray-700"
-          bgClass="bg-gray-50 border-gray-100"
+          valueClass="text-[#e2e8f0]"
+          bgClass="bg-[#0D1421] border-[#1E2A3D]"
         />
       </div>
     </div>

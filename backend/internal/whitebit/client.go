@@ -11,11 +11,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
 
-const defaultBaseURL = "https://api.whitebit.com"
+const defaultBaseURL = "https://whitebit.com"
 
 // Client is a WhiteBit REST API client with HMAC-SHA512 authentication.
 type Client struct {
@@ -45,7 +46,7 @@ type OrderResult struct {
 	Price     string `json:"price"`
 	Amount    string `json:"amount"`
 	Status    string `json:"status"` // "active", "filled", "cancelled"
-	Timestamp int64  `json:"timestamp"`
+	Timestamp float64 `json:"timestamp"`
 }
 
 // Position represents an open collateral position.
@@ -119,17 +120,18 @@ func (c *Client) doRequest(ctx context.Context, endpoint string, body map[string
 		return fmt.Errorf("whitebit: %s returned HTTP %d: %s", endpoint, resp.StatusCode, respBody)
 	}
 
-	// Decode into a raw map first so we can inspect the "message" field.
-	// WhiteBit returns HTTP 200 even for API-level errors; the error is
-	// signalled by a non-empty "message" field that is not "Ok".
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(respBody, &raw); err != nil {
-		return fmt.Errorf("whitebit: decode response from %s: %w", endpoint, err)
-	}
-	if msgRaw, ok := raw["message"]; ok {
-		var msg string
-		if jsonErr := json.Unmarshal(msgRaw, &msg); jsonErr == nil && msg != "" && msg != "Ok" {
-			return fmt.Errorf("whitebit API error: %s", msg)
+	// Some endpoints (e.g. /api/v4/orders) return a bare JSON array.
+	// Only attempt the map-based error-check when the response is a JSON object.
+	if len(respBody) > 0 && respBody[0] == '{' {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(respBody, &raw); err != nil {
+			return fmt.Errorf("whitebit: decode response from %s: %w", endpoint, err)
+		}
+		if msgRaw, ok := raw["message"]; ok {
+			var msg string
+			if jsonErr := json.Unmarshal(msgRaw, &msg); jsonErr == nil && msg != "" && msg != "Ok" {
+				return fmt.Errorf("whitebit API error: %s", msg)
+			}
 		}
 	}
 
@@ -142,14 +144,17 @@ func (c *Client) doRequest(ctx context.Context, endpoint string, body map[string
 }
 
 // PlaceCollateralLimitOrder places a collateral limit order on the given market.
-// side should be "buy" or "sell".
-func (c *Client) PlaceCollateralLimitOrder(market, side, amount, price string) (*OrderResult, error) {
+// side should be "buy" or "sell". positionSide should be "SHORT", "LONG", or "" for one-way mode.
+func (c *Client) PlaceCollateralLimitOrder(market, side, amount, price, positionSide string) (*OrderResult, error) {
 	const endpoint = "/api/v4/order/collateral/limit"
 	body := map[string]interface{}{
 		"market": market,
 		"side":   side,
 		"amount": amount,
 		"price":  price,
+	}
+	if positionSide != "" {
+		body["positionSide"] = positionSide
 	}
 	var result OrderResult
 	if err := c.doRequest(context.Background(), endpoint, body, &result); err != nil {
@@ -158,8 +163,9 @@ func (c *Client) PlaceCollateralLimitOrder(market, side, amount, price string) (
 	return &result, nil
 }
 
-// CancelOrder cancels an order by its ID on the given market.
-func (c *Client) CancelOrder(market string, orderID int64) error {
+// CancelCollateralLimitOrder cancels a regular (non-conditional) collateral limit order.
+// Used for entry and take-profit orders placed via /api/v4/order/collateral/limit.
+func (c *Client) CancelCollateralLimitOrder(market string, orderID int64) error {
 	const endpoint = "/api/v4/order/cancel"
 	body := map[string]interface{}{
 		"market":  market,
@@ -168,9 +174,35 @@ func (c *Client) CancelOrder(market string, orderID int64) error {
 	return c.doRequest(context.Background(), endpoint, body, nil)
 }
 
-// GetActiveOrders returns all active orders for the given market.
-func (c *Client) GetActiveOrders(market string) ([]OrderResult, error) {
+// CancelConditionalOrder cancels a conditional order (stop-limit).
+// Used for stop-loss orders placed via /api/v4/order/collateral/stop-limit.
+func (c *Client) CancelConditionalOrder(market string, orderID int64) error {
+	const endpoint = "/api/v4/order/conditional-cancel"
+	body := map[string]interface{}{
+		"market": market,
+		"id":     orderID,
+	}
+	return c.doRequest(context.Background(), endpoint, body, nil)
+}
+
+// GetActiveCollateralLimitOrders returns active non-conditional collateral limit orders for the given market.
+// Used to check entry and take-profit orders.
+func (c *Client) GetActiveCollateralLimitOrders(market string) ([]OrderResult, error) {
 	const endpoint = "/api/v4/orders"
+	body := map[string]interface{}{
+		"market": market,
+	}
+	var result []OrderResult
+	if err := c.doRequest(context.Background(), endpoint, body, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// GetActiveConditionalOrders returns active conditional orders (stop-limit) for the given market.
+// Used to check stop-loss orders.
+func (c *Client) GetActiveConditionalOrders(market string) ([]OrderResult, error) {
+	const endpoint = "/api/v4/orders/conditional"
 	body := map[string]interface{}{
 		"market": market,
 	}
@@ -183,7 +215,7 @@ func (c *Client) GetActiveOrders(market string) ([]OrderResult, error) {
 
 // GetPositions returns all open collateral positions.
 func (c *Client) GetPositions() ([]Position, error) {
-	const endpoint = "/api/v4/collateral/positions"
+	const endpoint = "/api/v4/collateral-account/positions"
 	body := map[string]interface{}{}
 	var result []Position
 	if err := c.doRequest(context.Background(), endpoint, body, &result); err != nil {
@@ -222,6 +254,22 @@ func (c *Client) GetExecutedOrder(market string, orderID int64) (found bool, fil
 		}
 	}
 	return false, 0, nil
+}
+
+// PlaceCollateralMarketOrder places a collateral market order.
+// amount "0" means close the entire position.
+func (c *Client) PlaceCollateralMarketOrder(market, side, amount string) (*OrderResult, error) {
+	const endpoint = "/api/v4/order/collateral/market"
+	params := map[string]interface{}{
+		"market": market,
+		"side":   side,
+		"amount": amount,
+	}
+	var result OrderResult
+	if err := c.doRequest(context.Background(), endpoint, params, &result); err != nil {
+		return nil, fmt.Errorf("whitebit: PlaceCollateralMarketOrder: %w", err)
+	}
+	return &result, nil
 }
 
 // PlaceStopLimitOrder places a stop-limit order via the collateral stop-limit endpoint.
@@ -266,4 +314,97 @@ func (c *Client) GetBalance() (float64, error) {
 		return 0, fmt.Errorf("whitebit: parse USDT balance %q: %w", entry.Available, err)
 	}
 	return balance, nil
+}
+
+// GetKlines fetches historical 1-minute OHLCV candles from the public kline endpoint.
+// interval is in seconds (60 = 1 minute). limit is the number of candles to return (max 1440).
+func (c *Client) GetKlines(market string, interval, limit int) ([]Candle, error) {
+	// V1 API works for BTC_PERP. V4 /api/v4/public/kline returns 404.
+	// Interval must be a string: "1m", "5m", "15m", "1h", etc.
+	intervalStr := "1m"
+	switch interval {
+	case 300:
+		intervalStr = "5m"
+	case 900:
+		intervalStr = "15m"
+	case 3600:
+		intervalStr = "1h"
+	}
+
+	params := url.Values{}
+	params.Set("market", market)
+	params.Set("interval", intervalStr)
+	params.Set("limit", strconv.Itoa(limit))
+
+	resp, err := c.httpClient.Get(c.baseURL + "/api/v1/public/kline?" + params.Encode())
+	if err != nil {
+		return nil, fmt.Errorf("whitebit: GetKlines: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("whitebit: GetKlines read body: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("whitebit: GetKlines HTTP %d: %s", resp.StatusCode, body)
+	}
+
+	// V1 response: {"success":true,"message":null,"result":[[time,open,close,high,low,vol,deal],...]}
+	var envelope struct {
+		Result [][]json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, fmt.Errorf("whitebit: GetKlines parse: %w", err)
+	}
+	raw := envelope.Result
+
+	candles := make([]Candle, 0, len(raw))
+	for _, fields := range raw {
+		if len(fields) < 6 {
+			continue
+		}
+		t, e0 := parseKlineInt(fields[0])
+		open, e1 := parseKlineFloat(fields[1])
+		close_, e2 := parseKlineFloat(fields[2])
+		high, e3 := parseKlineFloat(fields[3])
+		low, e4 := parseKlineFloat(fields[4])
+		vol, e5 := parseKlineFloat(fields[5])
+		if e0 != nil || e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
+			continue
+		}
+		candles = append(candles, Candle{
+			Time:   t,
+			Open:   open,
+			Close:  close_,
+			High:   high,
+			Low:    low,
+			Volume: vol,
+		})
+	}
+	return candles, nil
+}
+
+func parseKlineFloat(r json.RawMessage) (float64, error) {
+	var f float64
+	if err := json.Unmarshal(r, &f); err == nil {
+		return f, nil
+	}
+	var s string
+	if err := json.Unmarshal(r, &s); err != nil {
+		return 0, fmt.Errorf("parseKlineFloat: %s", r)
+	}
+	return strconv.ParseFloat(s, 64)
+}
+
+func parseKlineInt(r json.RawMessage) (int64, error) {
+	var i int64
+	if err := json.Unmarshal(r, &i); err == nil {
+		return i, nil
+	}
+	var s string
+	if err := json.Unmarshal(r, &s); err != nil {
+		return 0, fmt.Errorf("parseKlineInt: %s", r)
+	}
+	return strconv.ParseInt(s, 10, 64)
 }

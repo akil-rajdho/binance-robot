@@ -3,3 +3,20 @@
 * {
   box-sizing: border-box;
 }
+
+body {
+  background-color: #070B14;
+  color: #ffffff;
+}
+
+@theme {
+  --color-pok-bg: #070B14;
+  --color-pok-card: #111827;
+  --color-pok-elevated: #1A2332;
+  --color-pok-border: #1E2A3D;
+  --color-pok-blue: #1E7CF8;
+  --color-pok-blue-dim: #1a3a6b;
+  --color-pok-text: #ffffff;
+  --color-pok-muted: #94a3b8;
+  --color-pok-dimmed: #4b5563;
+}

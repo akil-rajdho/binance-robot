@@ -4,11 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
 	"github.com/bitcoin-robot/backend/internal/algorithm"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/lib/pq"
 )
 
 // Trade represents a trade record for API responses.
@@ -24,18 +25,26 @@ type Trade struct {
 	PnL        *float64   `json:"pnl,omitempty"`
 	Status     string     `json:"status"`
 	Reasoning  string     `json:"reasoning"` // raw JSON string
+	OrderID    int64      `json:"orderId"`   // WhiteBit entry order ID
+	TPOrderID  int64      `json:"tpOrderId"` // WhiteBit TP order ID
+	SLOrderID  int64      `json:"slOrderId"` // WhiteBit SL order ID
 }
 
-// DB is the SQLite database layer implementing algorithm.DBStore.
+// DB is the PostgreSQL database layer implementing algorithm.DBStore.
 type DB struct {
 	db *sql.DB
 }
 
-// New opens the SQLite database at dbPath, creates tables and inserts default settings.
-func New(dbPath string) (*DB, error) {
-	sqlDB, err := sql.Open("sqlite3", dbPath)
+// New opens the PostgreSQL database at dsn, creates tables and inserts default settings.
+func New(dsn string) (*DB, error) {
+	sqlDB, err := sql.Open("postgres", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("database: open %s: %w", dbPath, err)
+		return nil, fmt.Errorf("database: open: %w", err)
+	}
+
+	if err := sqlDB.Ping(); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("database: ping: %w", err)
 	}
 
 	d := &DB{db: sqlDB}
@@ -50,6 +59,9 @@ func New(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("database: insert default settings: %w", err)
 	}
 
+	migrateDefaultSetting(sqlDB, "75", "tp_distance", "50")
+	migrateDefaultSetting(sqlDB, "150", "sl_distance", "200")
+
 	return d, nil
 }
 
@@ -61,15 +73,15 @@ func (d *DB) Close() error {
 func (d *DB) createTables() error {
 	_, err := d.db.Exec(`
 		CREATE TABLE IF NOT EXISTS trades (
-			id            INTEGER PRIMARY KEY AUTOINCREMENT,
-			entry_time    DATETIME NOT NULL,
-			entry_price   REAL NOT NULL,
-			order_price   REAL NOT NULL,
-			tp_price      REAL NOT NULL,
-			sl_price      REAL NOT NULL,
-			exit_time     DATETIME,
-			exit_price    REAL,
-			pnl           REAL,
+			id            SERIAL PRIMARY KEY,
+			entry_time    TIMESTAMPTZ NOT NULL,
+			entry_price   DOUBLE PRECISION NOT NULL,
+			order_price   DOUBLE PRECISION NOT NULL,
+			tp_price      DOUBLE PRECISION NOT NULL,
+			sl_price      DOUBLE PRECISION NOT NULL,
+			exit_time     TIMESTAMPTZ,
+			exit_price    DOUBLE PRECISION,
+			pnl           DOUBLE PRECISION,
 			status        TEXT NOT NULL DEFAULT 'OPEN',
 			reasoning     TEXT NOT NULL DEFAULT '{}'
 		);
@@ -79,7 +91,22 @@ func (d *DB) createTables() error {
 			value TEXT NOT NULL
 		);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Add order ID columns to existing tables (idempotent).
+	migrations := []string{
+		`ALTER TABLE trades ADD COLUMN IF NOT EXISTS order_id    BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE trades ADD COLUMN IF NOT EXISTS tp_order_id BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_order_id BIGINT NOT NULL DEFAULT 0`,
+	}
+	for _, m := range migrations {
+		if _, merr := d.db.Exec(m); merr != nil {
+			return fmt.Errorf("database: migration %q: %w", m, merr)
+		}
+	}
+	return nil
 }
 
 func (d *DB) insertDefaultSettings() error {
@@ -91,11 +118,22 @@ func (d *DB) insertDefaultSettings() error {
 		"starting_balance":     "700",
 		"today_pnl":            "0",
 		"today_date":           time.Now().Format("2006-01-02"),
+		"entry_offset_initial": "150",
+		"entry_offset_step":    "20",
+		"entry_offset_min":     "50",
+		"order_cancel_minutes": "10",
+		"tp_distance":            "75",
+		"sl_distance":            "150",
+		"min_gap_pct":            "0.0010",
+		"cancel_cooldown_minutes": "5",
+		"entry_offset_pct":       "0.0020",
+		"min_impulse_pct":        "0.0020",
+		"max_atr_usdt":           "300",
 	}
 
 	for key, value := range defaults {
 		_, err := d.db.Exec(
-			`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
+			`INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`,
 			key, value,
 		)
 		if err != nil {
@@ -105,38 +143,50 @@ func (d *DB) insertDefaultSettings() error {
 	return nil
 }
 
-// SaveReasoningSnapshot inserts a new trade record with status='OPEN'.
-func (d *DB) SaveReasoningSnapshot(snapshot algorithm.ReasoningSnapshot) (tradeID int64, err error) {
+// migrateDefaultSetting updates key from oldVal to newVal only if the current stored value
+// is still the old default, leaving user-customized values untouched. Errors are logged but
+// not returned — migration failure is non-fatal.
+func migrateDefaultSetting(db *sql.DB, newVal, key, oldVal string) {
+	_, err := db.Exec(
+		`UPDATE settings SET value = $1 WHERE key = $2 AND value = $3`,
+		newVal, key, oldVal,
+	)
+	if err != nil {
+		log.Printf("database: migrateDefaultSetting %q (%s→%s): %v", key, oldVal, newVal, err)
+	}
+}
+
+// SaveReasoningSnapshot inserts a new trade record with status='OPEN' and returns its ID.
+// orderID is the WhiteBit entry order ID returned immediately after placing the limit order.
+func (d *DB) SaveReasoningSnapshot(snapshot algorithm.ReasoningSnapshot, orderID int64) (tradeID int64, err error) {
 	reasoningJSON, err := json.Marshal(snapshot)
 	if err != nil {
 		return 0, fmt.Errorf("database: marshal reasoning snapshot: %w", err)
 	}
 
-	result, err := d.db.Exec(
-		`INSERT INTO trades (entry_time, entry_price, order_price, tp_price, sl_price, status, reasoning)
-		 VALUES (?, ?, ?, ?, ?, 'OPEN', ?)`,
+	err = d.db.QueryRow(
+		`INSERT INTO trades (entry_time, entry_price, order_price, tp_price, sl_price, status, reasoning, order_id)
+		 VALUES ($1, $2, $3, $4, $5, 'OPEN', $6, $7)
+		 RETURNING id`,
 		snapshot.Timestamp,
 		snapshot.CurrentPrice,
 		snapshot.OrderPrice,
 		snapshot.TPPrice,
 		snapshot.SLPrice,
 		string(reasoningJSON),
-	)
+		orderID,
+	).Scan(&tradeID)
 	if err != nil {
 		return 0, fmt.Errorf("database: insert trade: %w", err)
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("database: get last insert id: %w", err)
-	}
-	return id, nil
+	return tradeID, nil
 }
 
 // UpdateTrade updates exit_time, exit_price, pnl, and status for the given trade.
 func (d *DB) UpdateTrade(tradeID int64, exitPrice float64, pnl float64, status string) error {
 	_, err := d.db.Exec(
-		`UPDATE trades SET exit_time = ?, exit_price = ?, pnl = ?, status = ? WHERE id = ?`,
+		`UPDATE trades SET exit_time = $1, exit_price = $2, pnl = $3, status = $4 WHERE id = $5`,
 		time.Now(), exitPrice, pnl, status, tradeID,
 	)
 	if err != nil {
@@ -145,10 +195,64 @@ func (d *DB) UpdateTrade(tradeID int64, exitPrice float64, pnl float64, status s
 	return nil
 }
 
+// UpdateOrderIDs saves the TP and SL order IDs for a trade once a position has opened.
+func (d *DB) UpdateOrderIDs(tradeID int64, tpOrderID, slOrderID int64) error {
+	_, err := d.db.Exec(
+		`UPDATE trades SET tp_order_id = $1, sl_order_id = $2 WHERE id = $3`,
+		tpOrderID, slOrderID, tradeID,
+	)
+	if err != nil {
+		return fmt.Errorf("database: update order IDs for trade %d: %w", tradeID, err)
+	}
+	return nil
+}
+
+// GetOpenTrades returns all trades with status='OPEN', ordered by id ASC.
+// The returned slice uses algorithm.OpenTrade so the state machine can consume it
+// directly without importing the database package.
+func (d *DB) GetOpenTrades() ([]algorithm.OpenTrade, error) {
+	rows, err := d.db.Query(
+		`SELECT id, order_price, entry_price, tp_price, sl_price,
+		        order_id, tp_order_id, sl_order_id, status
+		 FROM trades
+		 WHERE status = 'OPEN'
+		 ORDER BY id ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("database: query open trades: %w", err)
+	}
+	defer rows.Close()
+
+	var trades []algorithm.OpenTrade
+	for rows.Next() {
+		var t algorithm.OpenTrade
+		err := rows.Scan(
+			&t.ID,
+			&t.OrderPrice,
+			&t.EntryPrice,
+			&t.TPPrice,
+			&t.SLPrice,
+			&t.OrderID,
+			&t.TPOrderID,
+			&t.SLOrderID,
+			&t.Status,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("database: scan open trade row: %w", err)
+		}
+		trades = append(trades, t)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("database: iterate open trades: %w", err)
+	}
+	return trades, nil
+}
+
 // GetSetting returns the value for the given settings key.
 func (d *DB) GetSetting(key string) (string, error) {
 	var value string
-	err := d.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	err := d.db.QueryRow(`SELECT value FROM settings WHERE key = $1`, key).Scan(&value)
 	if err == sql.ErrNoRows {
 		return "", fmt.Errorf("database: setting %q not found", key)
 	}
@@ -161,8 +265,8 @@ func (d *DB) GetSetting(key string) (string, error) {
 // SetSetting upserts a key/value pair into the settings table.
 func (d *DB) SetSetting(key, value string) error {
 	_, err := d.db.Exec(
-		`INSERT INTO settings (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		`INSERT INTO settings (key, value) VALUES ($1, $2)
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
 		key, value,
 	)
 	if err != nil {
@@ -256,10 +360,11 @@ func (d *DB) GetStartingBalance() (float64, error) {
 func (d *DB) GetTrades(limit int) ([]Trade, error) {
 	rows, err := d.db.Query(
 		`SELECT id, entry_time, entry_price, order_price, tp_price, sl_price,
-		        exit_time, exit_price, pnl, status, reasoning
+		        exit_time, exit_price, pnl, status, reasoning,
+		        order_id, tp_order_id, sl_order_id
 		 FROM trades
 		 ORDER BY id DESC
-		 LIMIT ?`,
+		 LIMIT $1`,
 		limit,
 	)
 	if err != nil {
@@ -270,7 +375,7 @@ func (d *DB) GetTrades(limit int) ([]Trade, error) {
 	var trades []Trade
 	for rows.Next() {
 		var t Trade
-		var exitTimeStr sql.NullString
+		var exitTime sql.NullTime
 		var exitPrice sql.NullFloat64
 		var pnl sql.NullFloat64
 
@@ -281,28 +386,22 @@ func (d *DB) GetTrades(limit int) ([]Trade, error) {
 			&t.OrderPrice,
 			&t.TPPrice,
 			&t.SLPrice,
-			&exitTimeStr,
+			&exitTime,
 			&exitPrice,
 			&pnl,
 			&t.Status,
 			&t.Reasoning,
+			&t.OrderID,
+			&t.TPOrderID,
+			&t.SLOrderID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("database: scan trade row: %w", err)
 		}
 
-		if exitTimeStr.Valid && exitTimeStr.String != "" {
-			parsed, err := time.Parse(time.RFC3339Nano, exitTimeStr.String)
-			if err != nil {
-				// Try other common formats
-				parsed, err = time.Parse("2006-01-02T15:04:05Z", exitTimeStr.String)
-				if err != nil {
-					parsed, _ = time.Parse("2006-01-02 15:04:05", exitTimeStr.String)
-				}
-			}
-			t.ExitTime = &parsed
+		if exitTime.Valid {
+			t.ExitTime = &exitTime.Time
 		}
-
 		if exitPrice.Valid {
 			t.ExitPrice = &exitPrice.Float64
 		}

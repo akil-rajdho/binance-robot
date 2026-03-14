@@ -4,8 +4,14 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+const (
+	pingInterval = 30 * time.Second
+	pongTimeout  = 10 * time.Second
 )
 
 // Message is what gets broadcast to all frontend clients.
@@ -17,9 +23,10 @@ type Message struct {
 
 // Hub fans out messages from the backend to all connected frontend dashboard clients.
 type Hub struct {
-	mu       sync.RWMutex
-	clients  map[*websocket.Conn]bool
-	upgrader websocket.Upgrader
+	mu        sync.RWMutex
+	clients   map[*websocket.Conn]bool
+	upgrader  websocket.Upgrader
+	OnConnect func(conn *websocket.Conn) // called with each new connection to push initial state
 }
 
 // NewHub creates an initialised Hub ready to accept connections.
@@ -46,9 +53,25 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[Hub] Client connected: %s (total: %d)", conn.RemoteAddr(), h.clientCount())
 
+	// Push initial state to the new client so it doesn't wait for the next broadcast.
+	if h.OnConnect != nil {
+		h.OnConnect(conn)
+	}
+
+	// Set initial read deadline; extended on each pong received.
+	conn.SetReadDeadline(time.Now().Add(pingInterval + pongTimeout))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(pingInterval + pongTimeout))
+		return nil
+	})
+
+	// Ping ticker keeps the connection alive through proxies and browser idle timeouts.
+	ticker := time.NewTicker(pingInterval)
+
 	// Read pump: discard incoming messages and detect disconnects.
 	go func() {
 		defer func() {
+			ticker.Stop()
 			h.mu.Lock()
 			delete(h.clients, conn)
 			h.mu.Unlock()
@@ -59,6 +82,15 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				break
+			}
+		}
+	}()
+
+	// Write pump for pings; runs independently from broadcasts.
+	go func() {
+		for range ticker.C {
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(pongTimeout)); err != nil {
+				return
 			}
 		}
 	}()
