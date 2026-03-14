@@ -1,0 +1,21 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - ./data:/data
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # These are baked into the frontend at build time.
+      # localhost works when running Docker on your local machine.
+      # For remote deployment, change to your server's public IP/hostname.
+      - NEXT_PUBLIC_BACKEND_WS=ws://localhost:8080/ws
+      - NEXT_PUBLIC_BACKEND_API=http://localhost:8080/api
+    depends_on:
+      - backend
