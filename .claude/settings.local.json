@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(/opt/homebrew/bin/go mod:*)"
-    ]
-  }
-}

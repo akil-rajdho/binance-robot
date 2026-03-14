@@ -5,3 +5,10 @@ backend/bitcoin-robot
 node_modules/
 frontend/.next/
 frontend/out/
+
+# Claude/Superpowers internal files
+.claude/
+.superpowers/
+
+# Environment files
+.env

@@ -1,0 +1,90 @@
+// Bot states
+export type BotState = 'IDLE' | 'ORDER_PLACED' | 'POSITION_OPEN';
+
+// Algorithm state (matches Go AlgoState struct)
+export interface AlgoState {
+  state: BotState;
+  currentPrice: number;
+  high10min: number;
+  conditionMet: boolean;
+  nextOrderPrice: number;
+  activeOrderId: number;
+  activeOrderPrice: number;
+  tpPrice: number;
+  slPrice: number;
+  cancelAt: string; // ISO datetime string
+  botEnabled: boolean;
+}
+
+// Candlestick data
+export interface Candle {
+  time: number; // Unix timestamp (seconds)
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+// Trade from order history
+export interface Trade {
+  id: number;
+  entryTime: string;
+  entryPrice: number;
+  orderPrice: number;
+  tpPrice: number;
+  slPrice: number;
+  exitTime?: string;
+  exitPrice?: number;
+  pnl?: number;
+  status: 'OPEN' | 'TP_HIT' | 'SL_HIT' | 'CANCELLED';
+  reasoning: string; // raw JSON string
+}
+
+// Reasoning snapshot (parsed from Trade.reasoning)
+export interface ReasoningSnapshot {
+  timestamp: string;
+  current_price: number;
+  high_10min: number;
+  difference: number;
+  condition_met: boolean;
+  order_price: number;
+  tp_price: number;
+  sl_price: number;
+  position_size_usdt: number;
+  leverage: number;
+}
+
+// WebSocket message from backend
+export interface WSMessage {
+  type: 'price_tick' | 'candle' | 'algo_state' | 'order_update' | 'pnl_update';
+  data: unknown;
+}
+
+// Price tick data
+export interface PriceTick {
+  price: number;
+}
+
+// Trading state for the entire dashboard
+export interface TradingState {
+  connected: boolean;
+  currentPrice: number;
+  priceChange24h: number; // percentage
+  algoState: AlgoState | null;
+  candles: Candle[];
+  activeTrade: Trade | null;
+  trades: Trade[];
+  todayPnl: number;
+  totalPnl: number;
+  winRate: number; // 0-1
+}
+
+// Settings from /api/config
+export interface BotSettings {
+  position_size_usdt: string;
+  leverage: string;
+  daily_loss_limit_pct: string;
+  bot_enabled: string;
+  starting_balance: string;
+}
