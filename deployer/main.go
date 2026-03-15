@@ -3,7 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"html/template"
+	"text/template"
 	"io"
 	"log"
 	"net/http"
@@ -144,8 +144,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// Pass the token into the template so JS can use it for /run and /stream
-	if err := pageTmpl.Execute(w, r.URL.Query().Get("token")); err != nil {
+	if err := pageTmpl.Execute(w, nil); err != nil {
 		log.Println("template error:", err)
 	}
 }
@@ -347,7 +346,7 @@ var pageTmpl = template.Must(template.New("page").Parse(`<!DOCTYPE html>
 
 <script>
 (function() {
-  const TOKEN = {{.| printf "%q"}};
+  const TOKEN = new URLSearchParams(window.location.search).get('token') || '';
   const terminal  = document.getElementById('terminal');
   const badge     = document.getElementById('status-badge');
   const redeployBtn = document.getElementById('redeploy-btn');
