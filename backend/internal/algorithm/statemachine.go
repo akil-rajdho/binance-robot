@@ -1163,6 +1163,57 @@ func (sm *StateMachine) GetReasoningText() string {
 		}
 		diff := high - price
 		if price < high {
+			// Check each filter in the same order as the real placement logic.
+			gapRequired := high * sm.minGapPct
+			if diff < gapRequired {
+				return fmt.Sprintf(
+					"Condition MET: BTC at $%.2f is $%.2f below the 10m high of $%.2f. "+
+						"BLOCKED — gap too small ($%.2f < $%.2f required, %.2f%% threshold). "+
+						"Lower 'Min Gap %%' in Settings to allow entry.",
+					price, diff, high, diff, gapRequired, sm.minGapPct*100,
+				)
+			}
+			if !sm.lastCancelAt.IsZero() && time.Since(sm.lastCancelAt) < time.Duration(sm.cancelCooldownMins)*time.Minute {
+				remaining := time.Until(sm.lastCancelAt.Add(time.Duration(sm.cancelCooldownMins) * time.Minute)).Round(time.Second)
+				return fmt.Sprintf(
+					"Condition MET: BTC at $%.2f is $%.2f below the 10m high of $%.2f. "+
+						"BLOCKED — post-cancel cooldown active, %s remaining.",
+					price, diff, high, remaining,
+				)
+			}
+			if sm.minImpulsePct > 0 {
+				windowOpen := sm.priceWindow.Open()
+				if windowOpen > 0 {
+					impulse := (high - windowOpen) / windowOpen
+					if impulse < sm.minImpulsePct {
+						return fmt.Sprintf(
+							"Condition MET: BTC at $%.2f is $%.2f below the 10m high of $%.2f. "+
+								"BLOCKED — impulse too weak (%.3f%% < %.3f%% required). "+
+								"The 10m high was not a sharp enough move. Lower 'Min Impulse %%' in Settings.",
+							price, diff, high, impulse*100, sm.minImpulsePct*100,
+						)
+					}
+				}
+			}
+			if sm.highConfirmSeconds > 0 {
+				if sm.confirmedHigh != high {
+					return fmt.Sprintf(
+						"Condition MET: BTC at $%.2f is $%.2f below the 10m high of $%.2f. "+
+							"WAITING — new high detected, starting %ds stability timer before placing order.",
+						price, diff, high, sm.highConfirmSeconds,
+					)
+				}
+				waited := time.Since(sm.highFirstSeen)
+				required := time.Duration(sm.highConfirmSeconds) * time.Second
+				if waited < required {
+					remaining := (required - waited).Round(time.Second)
+					return fmt.Sprintf(
+						"Condition MET: BTC at $%.2f is $%.2f below the 10m high of $%.2f. "+
+							"WAITING — confirming high stability, %s remaining before placing order at $%.2f.",
+						price, diff, high, remaining, price+sm.entryOffset,
+					)
+				}
+			}
 			return fmt.Sprintf(
 				"Condition MET: BTC at $%.2f is $%.2f below the 10m high of $%.2f. Placing a short limit order at $%.2f (entry + $%.0f).",
 				price, diff, high, price+sm.entryOffset, sm.entryOffset,
