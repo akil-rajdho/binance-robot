@@ -47,6 +47,8 @@ type AlgoState struct {
 	CancelAt         time.Time `json:"cancelAt"` // when the open order will be cancelled
 	BotEnabled       bool      `json:"botEnabled"`
 	EntryOffset      float64   `json:"entryOffset"` // current entry offset above price for order placement
+	FilterStatus     string    `json:"filterStatus"` // human-readable reason why entry is currently blocked (empty = ready to enter)
+	CurrentATR       float64   `json:"currentAtr"`   // average true range of last ATR candle buffer (0 if insufficient data)
 }
 
 // ReasoningSnapshot is stored in DB when an order is placed.
@@ -177,8 +179,9 @@ type StateMachine struct {
 	atrCandles   []atrCandle // ring of last 15 candles for ATR computation
 
 	// high confirmation tracking
-	confirmedHigh float64    // the high value currently being timed
-	highFirstSeen time.Time  // when confirmedHigh was first observed
+	confirmedHigh      float64   // last high value seen; used for highConfirmSeconds timer
+	highFirstSeen      time.Time // when confirmedHigh was last set
+	lastFilterLogAt    time.Time // throttle for filter-block log messages (once per minute)
 
 	entryOffset          float64   // current offset for entry price (dynamic runtime state)
 	lastActiveOrderCheck time.Time // throttle: at most one active-order guard check per 30s
@@ -459,6 +462,7 @@ func (sm *StateMachine) checkPositionClosed(ctx context.Context) {
 	sm.slOrderID = 0
 	sm.tpPrice = 0
 	sm.slPrice = 0
+	sm.entryOffset = sm.entryOffsetInitial // reset adaptive offset after successful trade close
 	algoState := sm.buildAlgoState()
 	sm.mu.Unlock()
 
@@ -634,59 +638,62 @@ func (sm *StateMachine) OnPrice(price float64) {
 			}
 		}
 
-		// Suggestion 2: minimum gap filter — avoid entries on tiny dips
+		// Throttled logging helper: logs filter blocks at most once per minute.
+		logBlocked := func(format string, args ...interface{}) {
+			if time.Since(sm.lastFilterLogAt) >= time.Minute {
+				sm.lastFilterLogAt = time.Now()
+				log.Printf("[StateMachine] IDLE blocked — "+format, args...)
+			}
+		}
+
+		// Minimum gap filter — avoid entries on tiny dips
 		gapRequired := high * sm.minGapPct
 		if (high - price) < gapRequired {
+			logBlocked("gap too small: price=%.2f high=%.2f gap=%.2f required=%.2f (minGapPct=%.4f)", price, high, high-price, gapRequired, sm.minGapPct)
 			return
 		}
 
-		// Suggestion 3: post-cancel cooldown — avoid rapid re-entries after failed orders
+		// Post-cancel cooldown — avoid rapid re-entries after failed orders
 		if !sm.lastCancelAt.IsZero() && time.Since(sm.lastCancelAt) < time.Duration(sm.cancelCooldownMins)*time.Minute {
+			logBlocked("cancel cooldown active, %.0fs remaining", time.Until(sm.lastCancelAt.Add(time.Duration(sm.cancelCooldownMins)*time.Minute)).Seconds())
 			return
 		}
 
-		// Suggestion 6: momentum filter — only enter when the 10m high was an impulse move, not a slow drift
+		// Momentum filter — only enter when the 10m high was an impulse move, not a slow drift
 		if sm.minImpulsePct > 0 {
 			windowOpen := sm.priceWindow.Open()
 			if windowOpen > 0 {
 				impulse := (high - windowOpen) / windowOpen
 				if impulse < sm.minImpulsePct {
+					logBlocked("impulse too weak: %.4f%% < %.4f%% required (high=%.2f windowOpen=%.2f)", impulse*100, sm.minImpulsePct*100, high, windowOpen)
 					return
 				}
 			}
 		}
 
 		// ATR volatility halt: skip entry when market is too volatile
-		if sm.maxATRUsdt > 0 && len(sm.atrCandles) >= 2 {
-			var atrSum float64
-			count := 0
-			for i := 1; i < len(sm.atrCandles); i++ {
-				prevClose := sm.atrCandles[i-1].Close
-				tr := sm.atrCandles[i].High - sm.atrCandles[i].Low
-				if up := sm.atrCandles[i].High - prevClose; up > 0 && up > tr {
-					tr = up
-				}
-				if down := prevClose - sm.atrCandles[i].Low; down > 0 && down > tr {
-					tr = down
-				}
-				atrSum += tr
-				count++
-			}
-			if count > 0 {
-				atr := atrSum / float64(count)
-				if atr > sm.maxATRUsdt {
-					return // ATR volatility halt
-				}
+		if sm.maxATRUsdt > 0 {
+			if atr := sm.computeCurrentATR(); atr > 0 && atr > sm.maxATRUsdt {
+				logBlocked("ATR halt: atr=%.2f > maxATRUsdt=%.2f", atr, sm.maxATRUsdt)
+				return // ATR volatility halt
 			}
 		}
 
 		// high_confirm_seconds: wait for the 10m high to stabilise before entering.
-		// If the high changes, reset the timer.
-		if sm.confirmedHigh != high {
+		// Only reset the timer when a genuinely NEW HIGHER high is formed (price spiked up).
+		// When the high merely decreases because an old candle aged out of the rolling window,
+		// keep the confirmation timer running — the market hasn't made a new upward move.
+		if high > sm.confirmedHigh {
+			// New higher high — require fresh confirmation period.
 			sm.confirmedHigh = high
 			sm.highFirstSeen = time.Now()
+		} else {
+			// High unchanged or decreased (old peak aged out of rolling window).
+			// Update the stored value but do NOT reset the timer — the market hasn't spiked.
+			sm.confirmedHigh = high
 		}
 		if sm.highConfirmSeconds > 0 && time.Since(sm.highFirstSeen) < time.Duration(sm.highConfirmSeconds)*time.Second {
+			logBlocked("waiting for high confirmation: high=%.2f confirmed %.0fs ago, need %.0fs", high, time.Since(sm.highFirstSeen).Seconds(), float64(sm.highConfirmSeconds))
 			return
 		}
 
@@ -795,6 +802,9 @@ func (sm *StateMachine) OnPrice(price float64) {
 func (sm *StateMachine) SetEnabled(enabled bool) {
 	sm.mu.Lock()
 	sm.botEnabled = enabled
+	if enabled {
+		sm.entryOffset = sm.entryOffsetInitial // reset adaptive offset on re-enable
+	}
 	log.Printf("[StateMachine] botEnabled set to %v", enabled)
 	state := sm.buildAlgoState() // buildAlgoState requires the lock to be held
 	sm.mu.Unlock()
@@ -1105,20 +1115,52 @@ func (sm *StateMachine) GetAlgoState() AlgoState {
 	return sm.buildAlgoState()
 }
 
+// computeCurrentATR returns the average true range across the current atrCandles buffer.
+// Returns 0 if there are fewer than 2 candles (insufficient data for a single TR period).
+// Must be called with sm.mu held.
+func (sm *StateMachine) computeCurrentATR() float64 {
+	if len(sm.atrCandles) < 2 {
+		return 0
+	}
+	var atrSum float64
+	count := 0
+	for i := 1; i < len(sm.atrCandles); i++ {
+		prevClose := sm.atrCandles[i-1].Close
+		tr := sm.atrCandles[i].High - sm.atrCandles[i].Low
+		if up := sm.atrCandles[i].High - prevClose; up > 0 && up > tr {
+			tr = up
+		}
+		if down := prevClose - sm.atrCandles[i].Low; down > 0 && down > tr {
+			tr = down
+		}
+		atrSum += tr
+		count++
+	}
+	if count == 0 {
+		return 0
+	}
+	return atrSum / float64(count)
+}
+
 // buildAlgoState constructs an AlgoState snapshot. Must be called with sm.mu held.
 func (sm *StateMachine) buildAlgoState() AlgoState {
 	high := sm.candleWindow.High()
 	if high == 0 {
 		high = sm.priceWindow.High()
 	}
-	conditionMet := sm.currentPrice > 0 && high > 0 && sm.currentPrice < high
+	price := sm.currentPrice
+	conditionMet := price > 0 && high > 0 && price < high
 	var nextOrderPrice float64
 	if conditionMet {
-		nextOrderPrice = sm.currentPrice + sm.entryOffset
+		nextOrderPrice = price + sm.entryOffset
 	}
+
+	// Compute a human-readable description of what's currently blocking entry.
+	filterStatus := sm.computeFilterStatus(price, high)
+
 	return AlgoState{
 		State:            sm.state,
-		CurrentPrice:     sm.currentPrice,
+		CurrentPrice:     price,
 		High10min:        high,
 		ConditionMet:     conditionMet,
 		NextOrderPrice:   nextOrderPrice,
@@ -1129,7 +1171,83 @@ func (sm *StateMachine) buildAlgoState() AlgoState {
 		CancelAt:         sm.cancelAt,
 		BotEnabled:       sm.botEnabled,
 		EntryOffset:      sm.entryOffset,
+		FilterStatus:     filterStatus,
+		CurrentATR:       sm.computeCurrentATR(),
 	}
+}
+
+// computeFilterStatus returns a short string describing the first active filter blocking entry.
+// Returns "" if all filters would pass (entry is ready). Must be called with sm.mu held.
+func (sm *StateMachine) computeFilterStatus(price, high float64) string {
+	if !sm.botEnabled {
+		return "Bot disabled"
+	}
+	if sm.state != StateIdle {
+		return "" // not in idle — not relevant
+	}
+	if price == 0 || high == 0 {
+		return "Waiting for price data"
+	}
+	if price >= high {
+		return fmt.Sprintf("Price $%.0f ≥ 10m high $%.0f — waiting for pullback", price, high)
+	}
+
+	gapRequired := high * sm.minGapPct
+	gap := high - price
+	if gap < gapRequired {
+		return fmt.Sprintf("Gap $%.0f < $%.0f required (%.2f%% threshold)", gap, gapRequired, sm.minGapPct*100)
+	}
+
+	if !sm.lastCancelAt.IsZero() {
+		remaining := time.Until(sm.lastCancelAt.Add(time.Duration(sm.cancelCooldownMins) * time.Minute))
+		if remaining > 0 {
+			return fmt.Sprintf("Cancel cooldown: %s remaining", remaining.Round(time.Second))
+		}
+	}
+
+	if sm.minImpulsePct > 0 {
+		windowOpen := sm.priceWindow.Open()
+		if windowOpen > 0 {
+			impulse := (high - windowOpen) / windowOpen
+			if impulse < sm.minImpulsePct {
+				return fmt.Sprintf("Impulse %.3f%% < %.3f%% required", impulse*100, sm.minImpulsePct*100)
+			}
+		}
+	}
+
+	if sm.maxATRUsdt > 0 && len(sm.atrCandles) >= 2 {
+		var atrSum float64
+		count := 0
+		for i := 1; i < len(sm.atrCandles); i++ {
+			prevClose := sm.atrCandles[i-1].Close
+			tr := sm.atrCandles[i].High - sm.atrCandles[i].Low
+			if up := sm.atrCandles[i].High - prevClose; up > 0 && up > tr {
+				tr = up
+			}
+			if down := prevClose - sm.atrCandles[i].Low; down > 0 && down > tr {
+				tr = down
+			}
+			atrSum += tr
+			count++
+		}
+		if count > 0 {
+			atr := atrSum / float64(count)
+			if atr > sm.maxATRUsdt {
+				return fmt.Sprintf("ATR $%.0f > $%.0f limit (too volatile)", atr, sm.maxATRUsdt)
+			}
+		}
+	}
+
+	if sm.highConfirmSeconds > 0 {
+		waited := time.Since(sm.highFirstSeen)
+		required := time.Duration(sm.highConfirmSeconds) * time.Second
+		if waited < required {
+			remaining := (required - waited).Round(time.Second)
+			return fmt.Sprintf("Confirming high $%.0f — %s remaining", high, remaining)
+		}
+	}
+
+	return "" // all filters pass
 }
 
 // notifyStateChange calls OnStateChange if set. Safe to call without holding the mutex.
@@ -1145,7 +1263,10 @@ func (sm *StateMachine) GetReasoningText() string {
 	defer sm.mu.Unlock()
 
 	price := sm.currentPrice
-	high := sm.priceWindow.High()
+	high := sm.candleWindow.High()
+	if high == 0 {
+		high = sm.priceWindow.High()
+	}
 	state := sm.state
 
 	switch state {
@@ -1194,20 +1315,14 @@ func (sm *StateMachine) GetReasoningText() string {
 				}
 			}
 			if sm.highConfirmSeconds > 0 {
-				if sm.confirmedHigh != high {
-					return fmt.Sprintf(
-						"Condition MET: BTC at $%.2f is $%.2f below the 10m high of $%.2f. "+
-							"WAITING — new high detected, starting %ds stability timer before placing order.",
-						price, diff, high, sm.highConfirmSeconds,
-					)
-				}
 				waited := time.Since(sm.highFirstSeen)
 				required := time.Duration(sm.highConfirmSeconds) * time.Second
 				if waited < required {
 					remaining := (required - waited).Round(time.Second)
 					return fmt.Sprintf(
 						"Condition MET: BTC at $%.2f is $%.2f below the 10m high of $%.2f. "+
-							"WAITING — confirming high stability, %s remaining before placing order at $%.2f.",
+							"WAITING — confirming high stability, %s remaining before placing order at $%.2f. "+
+							"(Timer only resets on new higher highs, not when old peaks age out.)",
 						price, diff, high, remaining, price+sm.entryOffset,
 					)
 				}

@@ -15,6 +15,8 @@ export interface AlgoState {
   slPrice: number;
   cancelAt: string; // ISO datetime string
   botEnabled: boolean;
+  filterStatus?: string; // human-readable description of blocking filter (empty if all pass)
+  currentAtr?: number;  // average true range of last candle buffer (0 or absent if insufficient data)
 }
 
 // Candlestick data

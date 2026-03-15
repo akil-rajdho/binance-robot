@@ -100,6 +100,12 @@ export default function AlgorithmBrain({ algoState }: Props) {
             </span>
           </div>
         )}
+        {algoState.currentAtr != null && algoState.currentAtr > 0 && (
+          <div className="flex justify-between border-t border-[#1E2A3D] pt-1 mt-1">
+            <span className="text-[#94a3b8]">ATR</span>
+            <span className="font-mono text-sm text-[#e2e8f0]">{formatPrice(algoState.currentAtr)}</span>
+          </div>
+        )}
       </div>
 
       {/* State-specific info */}
@@ -112,6 +118,11 @@ export default function AlgorithmBrain({ algoState }: Props) {
           {algoState.entryOffset !== undefined && algoState.entryOffset !== 150 && (
             <p className="text-xs text-orange-400">
               Entry offset reduced to +${algoState.entryOffset} (was $150 — reset on next fill)
+            </p>
+          )}
+          {algoState.botEnabled && algoState.filterStatus && (
+            <p className="inline-flex items-center gap-1.5 rounded-md bg-amber-900/30 border border-amber-700 px-2.5 py-1 text-xs font-medium text-amber-400">
+              ⚠ Blocked: {algoState.filterStatus}
             </p>
           )}
         </div>

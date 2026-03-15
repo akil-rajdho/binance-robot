@@ -61,6 +61,7 @@ func New(dsn string) (*DB, error) {
 
 	migrateDefaultSetting(sqlDB, "75", "tp_distance", "50")
 	migrateDefaultSetting(sqlDB, "150", "sl_distance", "200")
+	migrateMinGapPct(sqlDB)
 
 	return d, nil
 }
@@ -154,6 +155,31 @@ func migrateDefaultSetting(db *sql.DB, newVal, key, oldVal string) {
 	)
 	if err != nil {
 		log.Printf("database: migrateDefaultSetting %q (%s→%s): %v", key, oldVal, newVal, err)
+	}
+}
+
+// migrateMinGapPct resets min_gap_pct to "0.0010" if the stored value is > 0.005 (0.5%).
+// Values that large prevent orders from ever being placed in normal markets.
+// Errors and no-ops are logged; migration failure is non-fatal.
+func migrateMinGapPct(db *sql.DB) {
+	var raw string
+	err := db.QueryRow(`SELECT value FROM settings WHERE key = 'min_gap_pct'`).Scan(&raw)
+	if err != nil {
+		// Row missing or DB error — nothing to migrate.
+		log.Printf("database: migrateMinGapPct: could not read min_gap_pct: %v", err)
+		return
+	}
+	val, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		// Unparseable value — leave it alone; the bot will surface the error itself.
+		return
+	}
+	if val > 0.005 {
+		log.Printf("[DB Migration] min_gap_pct was %.4f (%.2f%%) which is too large and prevents order placement — reset to 0.0010 (0.10%%)", val, val*100)
+		_, err = db.Exec(`UPDATE settings SET value = '0.0010' WHERE key = 'min_gap_pct'`)
+		if err != nil {
+			log.Printf("database: migrateMinGapPct: failed to reset min_gap_pct: %v", err)
+		}
 	}
 }
 
