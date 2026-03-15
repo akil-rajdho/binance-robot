@@ -35,6 +35,7 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - DEPLOY_TOKEN=${DEPLOY_TOKEN}
       - DEPLOY_SCRIPT=/project/deploy.sh
+      - BOT_AUTOSTART=${BOT_AUTOSTART:-false}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /root/binance-robot:/project

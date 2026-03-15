@@ -63,6 +63,13 @@ func main() {
 		log.Printf("warn: failed to load config into state machine: %v", err)
 	}
 
+	// Auto-start bot if BOT_AUTOSTART=true
+	if os.Getenv("BOT_AUTOSTART") == "true" {
+		log.Println("[Startup] BOT_AUTOSTART=true — enabling bot")
+		sm.SetEnabled(true)
+		sm.SyncOnEnable()
+	}
+
 	// 8b. Recover any open trades from a previous server run.
 	log.Println("[Startup] Checking for open trades to recover...")
 	if err := sm.RecoverOpenTrades(context.Background()); err != nil {
