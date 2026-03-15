@@ -1,0 +1,15 @@
+[Unit]
+Description=Bitcoin Robot Deployer
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/binance-robot/deployer
+ExecStart=/root/binance-robot/deployer/deployer
+Restart=always
+RestartSec=5
+EnvironmentFile=/root/binance-robot/.env
+
+[Install]
+WantedBy=multi-user.target
