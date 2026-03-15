@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /bitcoin-robot ./cmd/server
 # Stage 2: Runtime
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y ca-certificates git docker.io && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates git docker.io docker-compose && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /bitcoin-robot /bitcoin-robot
 
