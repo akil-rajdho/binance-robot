@@ -567,73 +567,15 @@ func (sm *StateMachine) OnPrice(price float64) {
 			return
 		}
 
-		// Suggestion 2: minimum gap filter — avoid entries on tiny dips
-		gapRequired := high * sm.minGapPct
-		if (high - price) < gapRequired {
-			return
-		}
-
-		// Suggestion 3: post-cancel cooldown — avoid rapid re-entries after failed orders
-		if !sm.lastCancelAt.IsZero() && time.Since(sm.lastCancelAt) < time.Duration(sm.cancelCooldownMins)*time.Minute {
-			return
-		}
-
-		// Suggestion 6: momentum filter — only enter when the 10m high was an impulse move, not a slow drift
-		if sm.minImpulsePct > 0 {
-			windowOpen := sm.priceWindow.Open()
-			if windowOpen > 0 {
-				impulse := (high - windowOpen) / windowOpen
-				if impulse < sm.minImpulsePct {
-					return
-				}
-			}
-		}
-
-		// ATR volatility halt: skip entry when market is too volatile
-		if sm.maxATRUsdt > 0 && len(sm.atrCandles) >= 2 {
-			var atrSum float64
-			count := 0
-			for i := 1; i < len(sm.atrCandles); i++ {
-				prevClose := sm.atrCandles[i-1].Close
-				tr := sm.atrCandles[i].High - sm.atrCandles[i].Low
-				if up := sm.atrCandles[i].High - prevClose; up > 0 && up > tr {
-					tr = up
-				}
-				if down := prevClose - sm.atrCandles[i].Low; down > 0 && down > tr {
-					tr = down
-				}
-				atrSum += tr
-				count++
-			}
-			if count > 0 {
-				atr := atrSum / float64(count)
-				if atr > sm.maxATRUsdt {
-					return // ATR volatility halt
-				}
-			}
-		}
-
-		// high_confirm_seconds: wait for the 10m high to stabilise before entering.
-		// If the high changes, reset the timer.
-		if sm.confirmedHigh != high {
-			sm.confirmedHigh = high
-			sm.highFirstSeen = time.Now()
-		}
-		if sm.highConfirmSeconds > 0 && time.Since(sm.highFirstSeen) < time.Duration(sm.highConfirmSeconds)*time.Second {
-			return
-		}
-
-		// Active order guard: before placing, check if an order already exists on WhiteBit.
-		// Throttled to at most once every 30 seconds.
+		// Active order guard: check unconditionally (before all entry filters) so that
+		// manually-placed orders are always adopted regardless of highConfirmSeconds,
+		// gap filter, cooldown, etc. Throttled to at most once every 30 seconds.
 		if time.Since(sm.lastActiveOrderCheck) >= 30*time.Second {
 			sm.lastActiveOrderCheck = time.Now()
 			activeOrders, guardErr := sm.orderMgr.GetActiveShortOrders(sm.ctx)
 			if guardErr != nil {
 				log.Printf("[StateMachine] GetActiveShortOrders guard error: %v", guardErr)
-				return // conservative: skip this tick if we can't verify
-			}
-			if len(activeOrders) > 0 {
-				// There is an active sell order we're not tracking — adopt it.
+			} else if len(activeOrders) > 0 {
 				found := activeOrders[0]
 				orderPrice := found.Price
 				tpPrice := orderPrice - sm.tpDistance
@@ -690,6 +632,62 @@ func (sm *StateMachine) OnPrice(price float64) {
 				go sm.notifyStateChange(algoState)
 				return
 			}
+		}
+
+		// Suggestion 2: minimum gap filter — avoid entries on tiny dips
+		gapRequired := high * sm.minGapPct
+		if (high - price) < gapRequired {
+			return
+		}
+
+		// Suggestion 3: post-cancel cooldown — avoid rapid re-entries after failed orders
+		if !sm.lastCancelAt.IsZero() && time.Since(sm.lastCancelAt) < time.Duration(sm.cancelCooldownMins)*time.Minute {
+			return
+		}
+
+		// Suggestion 6: momentum filter — only enter when the 10m high was an impulse move, not a slow drift
+		if sm.minImpulsePct > 0 {
+			windowOpen := sm.priceWindow.Open()
+			if windowOpen > 0 {
+				impulse := (high - windowOpen) / windowOpen
+				if impulse < sm.minImpulsePct {
+					return
+				}
+			}
+		}
+
+		// ATR volatility halt: skip entry when market is too volatile
+		if sm.maxATRUsdt > 0 && len(sm.atrCandles) >= 2 {
+			var atrSum float64
+			count := 0
+			for i := 1; i < len(sm.atrCandles); i++ {
+				prevClose := sm.atrCandles[i-1].Close
+				tr := sm.atrCandles[i].High - sm.atrCandles[i].Low
+				if up := sm.atrCandles[i].High - prevClose; up > 0 && up > tr {
+					tr = up
+				}
+				if down := prevClose - sm.atrCandles[i].Low; down > 0 && down > tr {
+					tr = down
+				}
+				atrSum += tr
+				count++
+			}
+			if count > 0 {
+				atr := atrSum / float64(count)
+				if atr > sm.maxATRUsdt {
+					return // ATR volatility halt
+				}
+			}
+		}
+
+		// high_confirm_seconds: wait for the 10m high to stabilise before entering.
+		// If the high changes, reset the timer.
+		if sm.confirmedHigh != high {
+			sm.confirmedHigh = high
+			sm.highFirstSeen = time.Now()
+		}
+		if sm.highConfirmSeconds > 0 && time.Since(sm.highFirstSeen) < time.Duration(sm.highConfirmSeconds)*time.Second {
+			return
 		}
 
 		// Suggestion 5: adaptive offset — use percentage of current price for the initial offset

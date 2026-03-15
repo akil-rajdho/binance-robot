@@ -23,6 +23,7 @@ export default function Home() {
   const [reasoningTrade, setReasoningTrade] = useState<Trade | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
+  const [deployConfirmOpen, setDeployConfirmOpen] = useState(false);
   const [deployLines, setDeployLines] = useState<string[]>([]);
   const [deployRunning, setDeployRunning] = useState(false);
 
@@ -117,13 +118,7 @@ export default function Home() {
               History
             </Link>
             <button
-              onClick={() => {
-                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-                if (token) headers['Authorization'] = `Bearer ${token}`;
-                fetch(`${DEPLOY_API_URL}/deploy/run`, { method: 'POST', headers }).catch(() => {});
-                setDeployLines([]);
-                setDeployOpen(true);
-              }}
+              onClick={() => setDeployConfirmOpen(true)}
               disabled={deployRunning}
               className="hidden md:inline-flex items-center gap-1.5 rounded-md border border-[#1E2A3D] bg-[#1A2332] px-3 py-2 text-sm font-medium text-[#94a3b8] transition-colors hover:bg-[#1E2A3D] disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -244,6 +239,40 @@ export default function Home() {
           <span className="text-xs font-medium">Settings</span>
         </button>
       </nav>
+
+      {/* Deploy confirmation */}
+      {deployConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDeployConfirmOpen(false)} />
+          <div className="relative z-10 w-full max-w-sm rounded-xl border border-[#1E2A3D] bg-[#0D1421] p-6 shadow-2xl">
+            <h2 className="mb-2 text-sm font-semibold text-white">Confirm Deploy</h2>
+            <p className="mb-5 text-xs text-[#94a3b8]">
+              This will pull the latest code and restart all containers. Trading will be briefly interrupted.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setDeployConfirmOpen(false)}
+                className="rounded-md border border-[#1E2A3D] bg-[#1A2332] px-4 py-2 text-xs font-medium text-[#94a3b8] hover:bg-[#1E2A3D] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                  if (token) headers['Authorization'] = `Bearer ${token}`;
+                  fetch(`${DEPLOY_API_URL}/deploy/run`, { method: 'POST', headers }).catch(() => {});
+                  setDeployConfirmOpen(false);
+                  setDeployLines([]);
+                  setDeployOpen(true);
+                }}
+                className="rounded-md bg-[#1E7CF8] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500 transition-colors"
+              >
+                Deploy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modals / Drawers */}
       <DeployTerminal
