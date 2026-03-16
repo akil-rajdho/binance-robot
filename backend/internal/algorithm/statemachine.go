@@ -559,8 +559,11 @@ func (sm *StateMachine) OnPrice(price float64) {
 	case StateIdle:
 		sm.priceWindow.Add(price)
 		high := sm.candleWindow.High()
-		if high == 0 {
-			high = sm.priceWindow.High()
+		// Also consider price-tick window: candle updates lag behind lastprice_update,
+		// so the current price can temporarily exceed the last candle high. Taking the
+		// max of both ensures the 10m high is never lower than any recent price tick.
+		if priceHigh := sm.priceWindow.High(); priceHigh > high {
+			high = priceHigh
 		}
 		if high == 0 {
 			return
@@ -1145,8 +1148,8 @@ func (sm *StateMachine) computeCurrentATR() float64 {
 // buildAlgoState constructs an AlgoState snapshot. Must be called with sm.mu held.
 func (sm *StateMachine) buildAlgoState() AlgoState {
 	high := sm.candleWindow.High()
-	if high == 0 {
-		high = sm.priceWindow.High()
+	if priceHigh := sm.priceWindow.High(); priceHigh > high {
+		high = priceHigh
 	}
 	price := sm.currentPrice
 	conditionMet := price > 0 && high > 0 && price < high
@@ -1264,8 +1267,8 @@ func (sm *StateMachine) GetReasoningText() string {
 
 	price := sm.currentPrice
 	high := sm.candleWindow.High()
-	if high == 0 {
-		high = sm.priceWindow.High()
+	if priceHigh := sm.priceWindow.High(); priceHigh > high {
+		high = priceHigh
 	}
 	state := sm.state
 
