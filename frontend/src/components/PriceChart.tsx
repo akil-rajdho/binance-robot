@@ -121,15 +121,17 @@ export default function PriceChart({ candles, high10min, trades }: Props) {
     chartRef.current?.timeScale().scrollToRealTime();
   }, [candles]);
 
-  // Update 10-min high line
+  // Update 10-min high line — only span the last 10 minutes so it reflects the
+  // rolling window the algorithm actually uses (not the full 3-hour chart history).
   useEffect(() => {
     if (!lineSeriesRef.current || candles.length === 0 || high10min <= 0) return;
 
-    const firstTime = candles[0].time as UTCTimestamp;
     const lastTime = candles[candles.length - 1].time as UTCTimestamp;
+    // 10 minutes = 600 seconds back from the latest candle
+    const tenMinAgo = (lastTime - 600) as UTCTimestamp;
 
     const lineData: LineData<UTCTimestamp>[] = [
-      { time: firstTime, value: high10min },
+      { time: tenMinAgo, value: high10min },
       { time: lastTime, value: high10min },
     ];
 

@@ -157,6 +157,22 @@ func main() {
 	// Start state machine poll loop
 	go sm.Start(ctx)
 
+	// Periodic algo-state heartbeat: broadcast current state every 5 s so the
+	// dashboard always shows fresh high10min, filterStatus, ATR, etc. even when
+	// no orders are being placed and the state machine has no transitions to fire.
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				hub.BroadcastJSON("algo_state", sm.GetAlgoState())
+			}
+		}
+	}()
+
 	// Start price feed (reconnects automatically)
 	go func() {
 		if err := priceFeed.Start(ctx); err != nil {
