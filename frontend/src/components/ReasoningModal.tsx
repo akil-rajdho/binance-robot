@@ -161,6 +161,11 @@ export default function ReasoningModal({ trade, onClose }: Props) {
                     Exit price: <span className="font-mono">{formatPrice(trade.exitPrice)}</span>
                   </p>
                 )}
+                {trade.status === 'CANCELLED' && trade.cancelPrice !== undefined && trade.cancelPrice > 0 && (
+                  <p className="text-sm text-[#94a3b8] mt-1">
+                    BTC price at cancel: <span className="font-mono">{formatPrice(trade.cancelPrice)}</span>
+                  </p>
+                )}
               </div>
             </>
           )}

@@ -27,7 +27,8 @@ type Trade struct {
 	Reasoning  string     `json:"reasoning"` // raw JSON string
 	OrderID    int64      `json:"orderId"`   // WhiteBit entry order ID
 	TPOrderID  int64      `json:"tpOrderId"` // WhiteBit TP order ID
-	SLOrderID  int64      `json:"slOrderId"` // WhiteBit SL order ID
+	SLOrderID   int64      `json:"slOrderId"`   // WhiteBit SL order ID
+	CancelPrice float64    `json:"cancelPrice"` // BTC price when order was cancelled (0 if not cancelled)
 }
 
 // DB is the PostgreSQL database layer implementing algorithm.DBStore.
@@ -99,9 +100,10 @@ func (d *DB) createTables() error {
 
 	// Add order ID columns to existing tables (idempotent).
 	migrations := []string{
-		`ALTER TABLE trades ADD COLUMN IF NOT EXISTS order_id    BIGINT NOT NULL DEFAULT 0`,
-		`ALTER TABLE trades ADD COLUMN IF NOT EXISTS tp_order_id BIGINT NOT NULL DEFAULT 0`,
-		`ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_order_id BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE trades ADD COLUMN IF NOT EXISTS order_id     BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE trades ADD COLUMN IF NOT EXISTS tp_order_id  BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_order_id  BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE trades ADD COLUMN IF NOT EXISTS cancel_price DOUBLE PRECISION NOT NULL DEFAULT 0`,
 	}
 	for _, m := range migrations {
 		if _, merr := d.db.Exec(m); merr != nil {
@@ -219,6 +221,18 @@ func (d *DB) UpdateTrade(tradeID int64, exitPrice float64, pnl float64, status s
 	)
 	if err != nil {
 		return fmt.Errorf("database: update trade %d: %w", tradeID, err)
+	}
+	return nil
+}
+
+// UpdateCancelPrice records the BTC spot price at the time the order was cancelled.
+func (d *DB) UpdateCancelPrice(tradeID int64, price float64) error {
+	_, err := d.db.Exec(
+		`UPDATE trades SET cancel_price = $1 WHERE id = $2`,
+		price, tradeID,
+	)
+	if err != nil {
+		return fmt.Errorf("database: UpdateCancelPrice(%d): %w", tradeID, err)
 	}
 	return nil
 }
@@ -401,7 +415,7 @@ func (d *DB) GetTrades(limit int) ([]Trade, error) {
 	rows, err := d.db.Query(
 		`SELECT id, entry_time, entry_price, order_price, tp_price, sl_price,
 		        exit_time, exit_price, pnl, status, reasoning,
-		        order_id, tp_order_id, sl_order_id
+		        order_id, tp_order_id, sl_order_id, cancel_price
 		 FROM trades
 		 ORDER BY id DESC
 		 LIMIT $1`,
@@ -434,6 +448,7 @@ func (d *DB) GetTrades(limit int) ([]Trade, error) {
 			&t.OrderID,
 			&t.TPOrderID,
 			&t.SLOrderID,
+			&t.CancelPrice,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("database: scan trade row: %w", err)

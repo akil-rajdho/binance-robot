@@ -83,6 +83,9 @@ export default function ActivePosition({ algoState }: Props) {
         <div className="space-y-3">
           {/* Price levels */}
           <div className="bg-[#0D1421] rounded-md p-2 md:p-3 space-y-2">
+            {current > 0 && (
+              <PriceRow label="Current Price" price={current} colorClass="text-blue-400" />
+            )}
             <PriceRow
               label={algoState.state === 'ORDER_PLACED' ? 'Order Price' : 'Entry Price'}
               price={algoState.activeOrderPrice}

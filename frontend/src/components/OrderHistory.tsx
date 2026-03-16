@@ -107,6 +107,13 @@ export default function OrderHistory({ trades, onWhyClick }: Props) {
                   </div>
                 </div>
 
+                {trade.status === 'CANCELLED' && trade.cancelPrice && trade.cancelPrice > 0 && (
+                  <div className="text-xs">
+                    <span className="text-[#4b5563]">Cancelled @</span>
+                    <span className="font-mono text-[#94a3b8] ml-1">{formatPrice(trade.cancelPrice)}</span>
+                  </div>
+                )}
+
                 {/* Why button */}
                 <button
                   onClick={() => onWhyClick(trade)}
@@ -127,6 +134,7 @@ export default function OrderHistory({ trades, onWhyClick }: Props) {
                   <th className="text-left py-2 pr-3 text-xs font-medium text-[#94a3b8]">Side</th>
                   <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">Order / Fill</th>
                   <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">Exit</th>
+                  <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">Cancel @</th>
                   <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">P&amp;L</th>
                   <th className="text-left py-2 pr-3 text-xs font-medium text-[#94a3b8]">Status</th>
                   <th className="py-2 text-xs font-medium text-[#94a3b8]"></th>
@@ -151,6 +159,11 @@ export default function OrderHistory({ trades, onWhyClick }: Props) {
                     <td className="py-2 pr-3 text-right font-mono text-[#94a3b8] whitespace-nowrap">
                       {trade.exitPrice !== undefined && trade.exitPrice !== null
                         ? formatPrice(trade.exitPrice)
+                        : '–'}
+                    </td>
+                    <td className="py-2 pr-3 text-right font-mono text-[#94a3b8] whitespace-nowrap">
+                      {trade.status === 'CANCELLED' && trade.cancelPrice && trade.cancelPrice > 0
+                        ? formatPrice(trade.cancelPrice)
                         : '–'}
                     </td>
                     <td className={`py-2 pr-3 text-right font-mono font-semibold whitespace-nowrap ${pnlColor(trade.pnl)}`}>

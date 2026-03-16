@@ -118,6 +118,8 @@ type DBStore interface {
 	SaveReasoningSnapshot(snapshot ReasoningSnapshot, orderID int64) (tradeID int64, err error)
 	// UpdateTrade closes a trade by recording exit price, pnl, and final status.
 	UpdateTrade(tradeID int64, exitPrice float64, pnl float64, status string) error
+	// UpdateCancelPrice records the BTC spot price at the time the order was cancelled.
+	UpdateCancelPrice(tradeID int64, price float64) error
 	// UpdateEntryPrice records the actual fill price once the entry order is confirmed.
 	UpdateEntryPrice(tradeID int64, entryPrice float64) error
 	// UpdateOrderIDs persists TP and SL order IDs once a position is open.
@@ -291,8 +293,14 @@ func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
 	if cancelled {
 		// Order was cancelled externally on WhiteBit — mark as CANCELLED in DB and return to IDLE.
 		log.Printf("[StateMachine] Order %d was cancelled on WhiteBit externally → IDLE", orderID)
+		sm.mu.Lock()
+		cancelAtPrice := sm.currentPrice
+		sm.mu.Unlock()
 		if dbErr := sm.db.UpdateTrade(tradeID, 0, 0, "CANCELLED"); dbErr != nil {
 			log.Printf("[StateMachine] UpdateTrade(CANCELLED) error: %v", dbErr)
+		}
+		if dbErr := sm.db.UpdateCancelPrice(tradeID, cancelAtPrice); dbErr != nil {
+			log.Printf("[StateMachine] UpdateCancelPrice error for trade %d: %v", tradeID, dbErr)
 		}
 		sm.mu.Lock()
 		if sm.state == StateOrderPlaced {
@@ -626,6 +634,7 @@ func (sm *StateMachine) OnPrice(price float64) {
 						return
 					}
 					cancelledTradeID := sm.activeTradeID
+					cancelledAtPrice := sm.currentPrice
 					if cancelErr := sm.orderMgr.CancelOrder(sm.ctx, sm.activeOrderID); cancelErr != nil {
 						log.Printf("[StateMachine] Cancel timer (adopted): CancelOrder(%d) error: %v", sm.activeOrderID, cancelErr)
 					}
@@ -644,6 +653,9 @@ func (sm *StateMachine) OnPrice(price float64) {
 					sm.mu.Unlock()
 					if dbErr := sm.db.UpdateTrade(cancelledTradeID, 0, 0, "CANCELLED"); dbErr != nil {
 						log.Printf("[StateMachine] Cancel timer (adopted): UpdateTrade(CANCELLED) error: %v", dbErr)
+					}
+					if dbErr := sm.db.UpdateCancelPrice(cancelledTradeID, cancelledAtPrice); dbErr != nil {
+						log.Printf("[StateMachine] UpdateCancelPrice error for trade %d: %v", cancelledTradeID, dbErr)
 					}
 					go sm.notifyStateChange(algoState)
 				})
@@ -770,6 +782,7 @@ func (sm *StateMachine) OnPrice(price float64) {
 				return
 			}
 			cancelledTradeID := sm.activeTradeID
+			cancelledAtPrice := sm.currentPrice
 			cancelErr := sm.orderMgr.CancelOrder(sm.ctx, sm.activeOrderID)
 			if cancelErr != nil {
 				log.Printf("[StateMachine] Cancel timer: CancelOrder(%d) error: %v", sm.activeOrderID, cancelErr)
@@ -790,6 +803,9 @@ func (sm *StateMachine) OnPrice(price float64) {
 			// Update DB outside the mutex so the record is marked CANCELLED immediately.
 			if dbErr := sm.db.UpdateTrade(cancelledTradeID, 0, 0, "CANCELLED"); dbErr != nil {
 				log.Printf("[StateMachine] Cancel timer: UpdateTrade(CANCELLED) error: %v", dbErr)
+			}
+			if dbErr := sm.db.UpdateCancelPrice(cancelledTradeID, cancelledAtPrice); dbErr != nil {
+				log.Printf("[StateMachine] UpdateCancelPrice error for trade %d: %v", cancelledTradeID, dbErr)
 			}
 			go sm.notifyStateChange(algoState)
 		})
@@ -922,6 +938,7 @@ func (sm *StateMachine) SyncOnEnable() {
 			return
 		}
 		cancelledTradeID := sm.activeTradeID
+		cancelledAtPrice := sm.currentPrice
 		if cancelErr := sm.orderMgr.CancelOrder(sm.ctx, sm.activeOrderID); cancelErr != nil {
 			log.Printf("[StateMachine] SyncOnEnable cancel timer: CancelOrder(%d) error: %v", sm.activeOrderID, cancelErr)
 		}
@@ -940,6 +957,9 @@ func (sm *StateMachine) SyncOnEnable() {
 		sm.mu.Unlock()
 		if dbErr := sm.db.UpdateTrade(cancelledTradeID, 0, 0, "CANCELLED"); dbErr != nil {
 			log.Printf("[StateMachine] SyncOnEnable cancel timer: UpdateTrade(CANCELLED) error: %v", dbErr)
+		}
+		if dbErr := sm.db.UpdateCancelPrice(cancelledTradeID, cancelledAtPrice); dbErr != nil {
+			log.Printf("[StateMachine] UpdateCancelPrice error for trade %d: %v", cancelledTradeID, dbErr)
 		}
 		go sm.notifyStateChange(algoState)
 	})

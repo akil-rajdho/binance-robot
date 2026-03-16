@@ -43,6 +43,7 @@ export interface Trade {
   exitPrice?: number;
   pnl?: number;
   status: 'OPEN' | 'TP_HIT' | 'SL_HIT' | 'CANCELLED';
+  cancelPrice?: number; // BTC price when order was cancelled (0 or absent if not cancelled)
   reasoning: string; // raw JSON string
 }
 
