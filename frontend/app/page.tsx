@@ -157,7 +157,10 @@ export default function Home() {
           <AlgorithmBrain algoState={algoState} />
         </div>
 
-        {/* Row 2: PriceChart (full width) */}
+        {/* Row 2: Algorithm Reasoning (above chart) */}
+        <AlgorithmReasoning token={token} onActivity={updateActivity} algoState={algoState} />
+
+        {/* Row 3: PriceChart (full width) */}
         <div>
           <PriceChart
             candles={candles}
@@ -165,9 +168,6 @@ export default function Home() {
             trades={trades}
           />
         </div>
-
-        {/* Row 2b: Algorithm Reasoning */}
-        <AlgorithmReasoning token={token} onActivity={updateActivity} />
 
         {/* Row 3: ActivePosition (1/3) | OrderHistory (2/3) */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
