@@ -613,10 +613,11 @@ func (sm *StateMachine) OnPrice(price float64) {
 				sm.state = StateOrderPlaced
 				sm.cancelTimer = time.AfterFunc(time.Duration(sm.orderCancelMinutes)*time.Minute, func() {
 					sm.mu.Lock()
-					defer sm.mu.Unlock()
 					if sm.state != StateOrderPlaced {
+						sm.mu.Unlock()
 						return
 					}
+					cancelledTradeID := sm.activeTradeID
 					if cancelErr := sm.orderMgr.CancelOrder(sm.ctx, sm.activeOrderID); cancelErr != nil {
 						log.Printf("[StateMachine] Cancel timer (adopted): CancelOrder(%d) error: %v", sm.activeOrderID, cancelErr)
 					}
@@ -632,6 +633,10 @@ func (sm *StateMachine) OnPrice(price float64) {
 					sm.slPrice = 0
 					sm.state = StateIdle
 					algoState := sm.buildAlgoState()
+					sm.mu.Unlock()
+					if dbErr := sm.db.UpdateTrade(cancelledTradeID, 0, 0, "CANCELLED"); dbErr != nil {
+						log.Printf("[StateMachine] Cancel timer (adopted): UpdateTrade(CANCELLED) error: %v", dbErr)
+					}
 					go sm.notifyStateChange(algoState)
 				})
 				log.Printf("[StateMachine] Adopted manual order %d at %.2f → ORDER_PLACED", found.OrderID, orderPrice)
@@ -752,11 +757,11 @@ func (sm *StateMachine) OnPrice(price float64) {
 		// Start cancel timer
 		sm.cancelTimer = time.AfterFunc(time.Duration(sm.orderCancelMinutes)*time.Minute, func() {
 			sm.mu.Lock()
-			defer sm.mu.Unlock()
-
 			if sm.state != StateOrderPlaced {
+				sm.mu.Unlock()
 				return
 			}
+			cancelledTradeID := sm.activeTradeID
 			cancelErr := sm.orderMgr.CancelOrder(sm.ctx, sm.activeOrderID)
 			if cancelErr != nil {
 				log.Printf("[StateMachine] Cancel timer: CancelOrder(%d) error: %v", sm.activeOrderID, cancelErr)
@@ -772,8 +777,12 @@ func (sm *StateMachine) OnPrice(price float64) {
 			sm.tpPrice = 0
 			sm.slPrice = 0
 			sm.state = StateIdle
-
 			algoState := sm.buildAlgoState()
+			sm.mu.Unlock()
+			// Update DB outside the mutex so the record is marked CANCELLED immediately.
+			if dbErr := sm.db.UpdateTrade(cancelledTradeID, 0, 0, "CANCELLED"); dbErr != nil {
+				log.Printf("[StateMachine] Cancel timer: UpdateTrade(CANCELLED) error: %v", dbErr)
+			}
 			go sm.notifyStateChange(algoState)
 		})
 
@@ -900,10 +909,11 @@ func (sm *StateMachine) SyncOnEnable() {
 	sm.state = StateOrderPlaced
 	sm.cancelTimer = time.AfterFunc(time.Duration(sm.orderCancelMinutes)*time.Minute, func() {
 		sm.mu.Lock()
-		defer sm.mu.Unlock()
 		if sm.state != StateOrderPlaced {
+			sm.mu.Unlock()
 			return
 		}
+		cancelledTradeID := sm.activeTradeID
 		if cancelErr := sm.orderMgr.CancelOrder(sm.ctx, sm.activeOrderID); cancelErr != nil {
 			log.Printf("[StateMachine] SyncOnEnable cancel timer: CancelOrder(%d) error: %v", sm.activeOrderID, cancelErr)
 		}
@@ -919,6 +929,10 @@ func (sm *StateMachine) SyncOnEnable() {
 		sm.lastCancelAt = time.Now()
 		sm.state = StateIdle
 		algoState := sm.buildAlgoState()
+		sm.mu.Unlock()
+		if dbErr := sm.db.UpdateTrade(cancelledTradeID, 0, 0, "CANCELLED"); dbErr != nil {
+			log.Printf("[StateMachine] SyncOnEnable cancel timer: UpdateTrade(CANCELLED) error: %v", dbErr)
+		}
 		go sm.notifyStateChange(algoState)
 	})
 	algoState := sm.buildAlgoState()

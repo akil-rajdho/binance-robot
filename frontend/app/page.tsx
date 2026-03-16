@@ -157,17 +157,8 @@ export default function Home() {
           <AlgorithmBrain algoState={algoState} />
         </div>
 
-        {/* Row 2: Algorithm Reasoning (above chart) */}
+        {/* Row 2: Algorithm Reasoning */}
         <AlgorithmReasoning token={token} onActivity={updateActivity} algoState={algoState} />
-
-        {/* Row 3: PriceChart (full width) */}
-        <div>
-          <PriceChart
-            candles={candles}
-            high10min={high10min}
-            trades={trades}
-          />
-        </div>
 
         {/* Row 3: ActivePosition (1/3) | OrderHistory (2/3) */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -180,6 +171,15 @@ export default function Home() {
               onWhyClick={(trade) => setReasoningTrade(trade)}
             />
           </div>
+        </div>
+
+        {/* Row 4: PriceChart (full width, at bottom) */}
+        <div>
+          <PriceChart
+            candles={candles}
+            high10min={high10min}
+            trades={trades}
+          />
         </div>
 
       </main>
