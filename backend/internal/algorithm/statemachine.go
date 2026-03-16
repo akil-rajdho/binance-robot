@@ -118,6 +118,8 @@ type DBStore interface {
 	SaveReasoningSnapshot(snapshot ReasoningSnapshot, orderID int64) (tradeID int64, err error)
 	// UpdateTrade closes a trade by recording exit price, pnl, and final status.
 	UpdateTrade(tradeID int64, exitPrice float64, pnl float64, status string) error
+	// UpdateEntryPrice records the actual fill price once the entry order is confirmed.
+	UpdateEntryPrice(tradeID int64, entryPrice float64) error
 	// UpdateOrderIDs persists TP and SL order IDs once a position is open.
 	UpdateOrderIDs(tradeID int64, tpOrderID, slOrderID int64) error
 	// GetOpenTrades returns all trades with status='OPEN', ordered by id DESC.
@@ -208,7 +210,7 @@ func NewStateMachine(priceWindow *PriceWindow, orderMgr OrderManager, db DBStore
 		entryOffsetStep:    20.0,
 		entryOffsetMin:     50.0,
 		orderCancelMinutes: 10.0,
-		tpDistance:         75.0,
+		tpDistance:         70.0,
 		slDistance:         150.0,
 		entryOffset:        150.0,
 		minGapPct:          0.001,
@@ -371,6 +373,10 @@ func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
 	// Persist TP and SL order IDs so recovery can find them after a restart.
 	if dbErr := sm.db.UpdateOrderIDs(tradeID, tpID, slID); dbErr != nil {
 		log.Printf("[StateMachine] UpdateOrderIDs error for trade %d: %v", tradeID, dbErr)
+	}
+	// Record the actual fill price now that the order is confirmed.
+	if dbErr := sm.db.UpdateEntryPrice(tradeID, entryPrice); dbErr != nil {
+		log.Printf("[StateMachine] UpdateEntryPrice error for trade %d: %v", tradeID, dbErr)
 	}
 
 	log.Printf("[StateMachine] Order %d filled at %.2f → POSITION_OPEN (TP=%.2f, SL=%.2f)", orderID, entryPrice, tpPrice, slPrice)

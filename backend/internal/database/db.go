@@ -62,6 +62,7 @@ func New(dsn string) (*DB, error) {
 	migrateDefaultSetting(sqlDB, "75", "tp_distance", "50")
 	migrateDefaultSetting(sqlDB, "150", "sl_distance", "200")
 	migrateMinGapPct(sqlDB)
+	migrateDefaultSetting(sqlDB, "70", "tp_distance", "75")
 
 	return d, nil
 }
@@ -123,7 +124,7 @@ func (d *DB) insertDefaultSettings() error {
 		"entry_offset_step":    "20",
 		"entry_offset_min":     "50",
 		"order_cancel_minutes": "10",
-		"tp_distance":            "75",
+		"tp_distance":            "70",
 		"sl_distance":            "150",
 		"min_gap_pct":            "0.0010",
 		"cancel_cooldown_minutes": "5",
@@ -196,7 +197,7 @@ func (d *DB) SaveReasoningSnapshot(snapshot algorithm.ReasoningSnapshot, orderID
 		 VALUES ($1, $2, $3, $4, $5, 'OPEN', $6, $7)
 		 RETURNING id`,
 		snapshot.Timestamp,
-		snapshot.CurrentPrice,
+		0,
 		snapshot.OrderPrice,
 		snapshot.TPPrice,
 		snapshot.SLPrice,
@@ -218,6 +219,18 @@ func (d *DB) UpdateTrade(tradeID int64, exitPrice float64, pnl float64, status s
 	)
 	if err != nil {
 		return fmt.Errorf("database: update trade %d: %w", tradeID, err)
+	}
+	return nil
+}
+
+// UpdateEntryPrice records the actual fill price once the entry order is confirmed filled.
+func (d *DB) UpdateEntryPrice(tradeID int64, entryPrice float64) error {
+	_, err := d.db.Exec(
+		`UPDATE trades SET entry_price = $1 WHERE id = $2`,
+		entryPrice, tradeID,
+	)
+	if err != nil {
+		return fmt.Errorf("database: UpdateEntryPrice trade %d: %w", tradeID, err)
 	}
 	return nil
 }

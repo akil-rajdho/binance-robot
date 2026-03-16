@@ -86,7 +86,9 @@ export default function OrderHistory({ trades, onWhyClick }: Props) {
                   <div>
                     <p className="text-[#4b5563] mb-0.5">Entry</p>
                     <p className="font-mono text-[#e2e8f0]">
-                      {formatPrice(trade.entryPrice || trade.orderPrice)}
+                      {trade.status === 'OPEN' || trade.status === 'CANCELLED'
+                        ? formatPrice(trade.orderPrice)
+                        : formatPrice(trade.entryPrice || trade.orderPrice)}
                     </p>
                   </div>
                   <div>
@@ -123,7 +125,7 @@ export default function OrderHistory({ trades, onWhyClick }: Props) {
                 <tr className="border-b border-[#1E2A3D]">
                   <th className="text-left py-2 pr-3 text-xs font-medium text-[#94a3b8] whitespace-nowrap">Time</th>
                   <th className="text-left py-2 pr-3 text-xs font-medium text-[#94a3b8]">Side</th>
-                  <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">Entry</th>
+                  <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">Order / Fill</th>
                   <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">Exit</th>
                   <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">P&amp;L</th>
                   <th className="text-left py-2 pr-3 text-xs font-medium text-[#94a3b8]">Status</th>
@@ -142,7 +144,9 @@ export default function OrderHistory({ trades, onWhyClick }: Props) {
                       </span>
                     </td>
                     <td className="py-2 pr-3 text-right font-mono text-[#e2e8f0] whitespace-nowrap">
-                      {formatPrice(trade.entryPrice || trade.orderPrice)}
+                      {trade.status === 'OPEN' || trade.status === 'CANCELLED'
+                        ? formatPrice(trade.orderPrice)
+                        : formatPrice(trade.entryPrice || trade.orderPrice)}
                     </td>
                     <td className="py-2 pr-3 text-right font-mono text-[#94a3b8] whitespace-nowrap">
                       {trade.exitPrice !== undefined && trade.exitPrice !== null
