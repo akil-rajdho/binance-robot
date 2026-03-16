@@ -49,6 +49,8 @@ type AlgoState struct {
 	EntryOffset      float64   `json:"entryOffset"` // current entry offset above price for order placement
 	FilterStatus     string    `json:"filterStatus"` // human-readable reason why entry is currently blocked (empty = ready to enter)
 	CurrentATR       float64   `json:"currentAtr"`   // average true range of last ATR candle buffer (0 if insufficient data)
+	PositionSizeUsdt float64   `json:"positionSizeUsdt"` // configured position size in USDT
+	Leverage         int       `json:"leverage"`         // configured leverage multiplier
 }
 
 // ReasoningSnapshot is stored in DB when an order is placed.
@@ -1190,6 +1192,8 @@ func (sm *StateMachine) buildAlgoState() AlgoState {
 		EntryOffset:      sm.entryOffset,
 		FilterStatus:     filterStatus,
 		CurrentATR:       sm.computeCurrentATR(),
+		PositionSizeUsdt: sm.positionSizeUSDT,
+		Leverage:         sm.leverage,
 	}
 }
 

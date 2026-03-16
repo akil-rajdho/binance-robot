@@ -17,6 +17,8 @@ export interface AlgoState {
   botEnabled: boolean;
   filterStatus?: string; // human-readable description of blocking filter (empty if all pass)
   currentAtr?: number;  // average true range of last candle buffer (0 or absent if insufficient data)
+  positionSizeUsdt?: number; // configured position size in USDT
+  leverage?: number;         // configured leverage multiplier
 }
 
 // Candlestick data
