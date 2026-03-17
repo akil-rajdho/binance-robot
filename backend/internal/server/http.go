@@ -3,11 +3,14 @@ package server
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,6 +79,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/auth/login", s.handleLogin)
 	s.mux.HandleFunc("/api/deploy", s.handleDeploy)
 	s.mux.HandleFunc("/api/deploy/logs", s.handleDeployLogs)
+	s.mux.HandleFunc("/deploy", s.handleDeployStream)
 
 	// Protected deploy trigger — requires JWT (for dashboard button).
 	s.mux.HandleFunc("/api/deploy/run", s.handleDeployRun)
@@ -219,6 +223,61 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deploy started"})
+}
+
+// GET /deploy — streaming deploy endpoint with black terminal output.
+func (s *Server) handleDeployStream(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.DeployToken == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.URL.Query().Get("token") != s.cfg.DeployToken {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+
+	flusher, canFlush := w.(http.Flusher)
+	fmt.Fprint(w, `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{background:#000;color:#00ff00;font-family:monospace;font-size:13px;padding:16px;margin:0}pre{white-space:pre-wrap;word-break:break-all}.info{color:#60a5fa}.success{color:#4ade80}.error{color:#f87171}</style></head><body><pre>`)
+	if canFlush {
+		flusher.Flush()
+	}
+
+	cmd := exec.Command("sh", "-c", s.cfg.DeployScript)
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(w, `<span class="error">failed to start deploy: %s</span>`+"\n", html.EscapeString(err.Error()))
+		return
+	}
+
+	go func() { cmd.Wait(); pw.Close() }()
+
+	scanner := bufio.NewScanner(pr)
+	for scanner.Scan() {
+		line := scanner.Text()
+		escaped := html.EscapeString(line)
+		lower := strings.ToLower(line)
+		var class string
+		switch {
+		case strings.Contains(lower, "error") || strings.Contains(lower, "failed") || strings.Contains(lower, "fatal"):
+			class = "error"
+		case strings.HasPrefix(line, "---") || strings.HasPrefix(line, "==="):
+			class = "info"
+		default:
+			class = "success"
+		}
+		fmt.Fprintf(w, `<span class="%s">%s</span>`+"\n", class, escaped)
+		if canFlush {
+			flusher.Flush()
+		}
+	}
+	fmt.Fprint(w, `</pre></body></html>`)
 }
 
 // POST /api/deploy/run — JWT-protected deploy trigger for the dashboard button.
