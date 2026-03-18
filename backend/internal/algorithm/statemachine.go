@@ -4,9 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"sync"
 	"time"
 )
+
+// roundPrice rounds a price to the nearest 0.1 (WhiteBit BTC_PERP min price step).
+func roundPrice(p float64) float64 {
+	return math.Round(p*10) / 10
+}
 
 type BotState int
 
@@ -365,8 +371,8 @@ func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
 	slDist := sm.slDistance
 	sm.mu.Unlock()
 
-	tpPrice := entryPrice - tpDist
-	slPrice := entryPrice + slDist
+	tpPrice := roundPrice(entryPrice - tpDist)
+	slPrice := roundPrice(entryPrice + slDist)
 
 	tpID, err := sm.orderMgr.PlaceTakeProfit(ctx, orderID, tpPrice)
 	if err != nil {
@@ -657,8 +663,8 @@ func (sm *StateMachine) OnPrice(price float64) {
 			} else if len(activeOrders) > 0 {
 				found := activeOrders[0]
 				orderPrice := found.Price
-				tpPrice := orderPrice - sm.tpDistance
-				slPrice := orderPrice + sm.slDistance
+				tpPrice := roundPrice(orderPrice - sm.tpDistance)
+				slPrice := roundPrice(orderPrice + sm.slDistance)
 				snapshot := ReasoningSnapshot{
 					Timestamp:        time.Now(),
 					CurrentPrice:     price,
@@ -801,7 +807,7 @@ func (sm *StateMachine) OnPrice(price float64) {
 		}
 
 		// No existing active orders — place new order.
-		orderPrice := price + offset
+		orderPrice := roundPrice(price + offset)
 		amount := fmt.Sprintf("%.3f", sm.positionSizeUSDT/price*float64(sm.leverage))
 
 		orderID, err := sm.orderMgr.PlaceShortLimitOrder(sm.ctx, orderPrice, amount)
@@ -989,8 +995,8 @@ func (sm *StateMachine) SyncOnEnable() {
 
 		// Adopt the position: create a DB trade entry and transition to POSITION_OPEN
 		entryPrice := shortPos.BasePrice
-		tpPrice := entryPrice - tpDist
-		slPrice := entryPrice + slDist
+		tpPrice := roundPrice(entryPrice - tpDist)
+		slPrice := roundPrice(entryPrice + slDist)
 
 		snapshot := ReasoningSnapshot{
 			Timestamp:        time.Now(),
@@ -1057,8 +1063,8 @@ func (sm *StateMachine) SyncOnEnable() {
 
 	found := activeOrders[0]
 	orderPrice := found.Price
-	tpPrice := orderPrice - tpDist
-	slPrice := orderPrice + slDist
+	tpPrice := roundPrice(orderPrice - tpDist)
+	slPrice := roundPrice(orderPrice + slDist)
 
 	snapshot := ReasoningSnapshot{
 		Timestamp:        time.Now(),

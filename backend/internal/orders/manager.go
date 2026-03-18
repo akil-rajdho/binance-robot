@@ -26,7 +26,7 @@ func NewManager(client *whitebit.Client, market string) *Manager {
 
 // PlaceShortLimitOrder places a collateral limit sell order on the market.
 func (m *Manager) PlaceShortLimitOrder(_ context.Context, price float64, amount string) (orderID int64, err error) {
-	priceStr := fmt.Sprintf("%.2f", price)
+	priceStr := fmt.Sprintf("%.1f", price)
 	result, err := m.client.PlaceCollateralLimitOrder(m.market, "sell", amount, priceStr, "")
 	if err != nil {
 		return 0, fmt.Errorf("orders: PlaceShortLimitOrder: %w", err)
@@ -52,7 +52,7 @@ func (m *Manager) CancelOrder(_ context.Context, orderID int64) error {
 // PlaceTakeProfit places a limit BUY order to close a short position at the given price.
 // amount "0" signals WhiteBit to close the entire position.
 func (m *Manager) PlaceTakeProfit(_ context.Context, _ int64, price float64) (orderID int64, err error) {
-	priceStr := fmt.Sprintf("%.2f", price)
+	priceStr := fmt.Sprintf("%.1f", price)
 	result, err := m.client.PlaceCollateralLimitOrder(m.market, "buy", "0", priceStr, "")
 	if err != nil {
 		return 0, fmt.Errorf("orders: PlaceTakeProfit: %w", err)
@@ -63,8 +63,8 @@ func (m *Manager) PlaceTakeProfit(_ context.Context, _ int64, price float64) (or
 // PlaceStopLoss places a stop-limit BUY order to close a short position when price rises to SL price.
 // Uses activation_price = SL price, limit price = SL price + 10 (slippage buffer).
 func (m *Manager) PlaceStopLoss(_ context.Context, _ int64, price float64) (orderID int64, err error) {
-	priceStr := fmt.Sprintf("%.2f", price)
-	limitStr := fmt.Sprintf("%.2f", price+10)
+	priceStr := fmt.Sprintf("%.1f", price)
+	limitStr := fmt.Sprintf("%.1f", price+10)
 	result, err := m.client.PlaceStopLimitOrder(m.market, "buy", "0", priceStr, limitStr)
 	if err != nil {
 		return 0, fmt.Errorf("orders: PlaceStopLoss: %w", err)
