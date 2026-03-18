@@ -51,6 +51,21 @@ type AlgoState struct {
 	CurrentATR       float64   `json:"currentAtr"`   // average true range of last ATR candle buffer (0 if insufficient data)
 	PositionSizeUsdt float64   `json:"positionSizeUsdt"` // configured position size in USDT
 	Leverage         int       `json:"leverage"`         // configured leverage multiplier
+
+	// Filter thresholds (from config)
+	MinGapPct          float64 `json:"minGapPct"`          // configured min gap percentage
+	MinImpulsePct      float64 `json:"minImpulsePct"`      // configured min impulse percentage
+	MaxATRUsdt         float64 `json:"maxAtrUsdt"`         // configured max ATR threshold
+	CancelCooldownMins float64 `json:"cancelCooldownMins"` // configured cooldown minutes
+	HighConfirmSeconds int     `json:"highConfirmSeconds"` // configured high confirmation seconds
+
+	// Current filter values (live)
+	CurrentGap           float64 `json:"currentGap"`           // current price gap from high (high - price)
+	CurrentGapPct        float64 `json:"currentGapPct"`        // current gap as percentage of high
+	RequiredGap          float64 `json:"requiredGap"`          // minGapPct * high (dollar amount needed)
+	CurrentImpulse       float64 `json:"currentImpulse"`       // current impulse value (high - windowOpen) / windowOpen
+	CooldownRemaining    float64 `json:"cooldownRemaining"`    // seconds remaining in cooldown (0 if none)
+	HighConfirmRemaining float64 `json:"highConfirmRemaining"` // seconds remaining for high confirmation (0 if confirmed)
 }
 
 // ReasoningSnapshot is stored in DB when an order is placed.
@@ -1203,6 +1218,39 @@ func (sm *StateMachine) buildAlgoState() AlgoState {
 	// Compute a human-readable description of what's currently blocking entry.
 	filterStatus := sm.computeFilterStatus(price, high)
 
+	// Current filter values
+	gap := 0.0
+	gapPct := 0.0
+	requiredGap := 0.0
+	if high > 0 && price > 0 {
+		gap = high - price
+		gapPct = gap / high
+		requiredGap = sm.minGapPct * high
+	}
+
+	impulse := 0.0
+	windowOpen := sm.priceWindow.Open()
+	if windowOpen > 0 && high > 0 {
+		impulse = (high - windowOpen) / windowOpen
+	}
+
+	cooldownRemaining := 0.0
+	if !sm.lastCancelAt.IsZero() {
+		remaining := time.Until(sm.lastCancelAt.Add(time.Duration(sm.cancelCooldownMins) * time.Minute))
+		if remaining > 0 {
+			cooldownRemaining = remaining.Seconds()
+		}
+	}
+
+	highConfirmRemaining := 0.0
+	if sm.highConfirmSeconds > 0 {
+		waited := time.Since(sm.highFirstSeen)
+		required := time.Duration(sm.highConfirmSeconds) * time.Second
+		if waited < required {
+			highConfirmRemaining = (required - waited).Seconds()
+		}
+	}
+
 	return AlgoState{
 		State:            sm.state,
 		CurrentPrice:     price,
@@ -1220,6 +1268,21 @@ func (sm *StateMachine) buildAlgoState() AlgoState {
 		CurrentATR:       sm.computeCurrentATR(),
 		PositionSizeUsdt: sm.positionSizeUSDT,
 		Leverage:         sm.leverage,
+
+		// Filter thresholds
+		MinGapPct:          sm.minGapPct,
+		MinImpulsePct:      sm.minImpulsePct,
+		MaxATRUsdt:         sm.maxATRUsdt,
+		CancelCooldownMins: sm.cancelCooldownMins,
+		HighConfirmSeconds: sm.highConfirmSeconds,
+
+		// Current filter values
+		CurrentGap:           gap,
+		CurrentGapPct:        gapPct,
+		RequiredGap:          requiredGap,
+		CurrentImpulse:       impulse,
+		CooldownRemaining:    cooldownRemaining,
+		HighConfirmRemaining: highConfirmRemaining,
 	}
 }
 

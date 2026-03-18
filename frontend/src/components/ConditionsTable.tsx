@@ -103,7 +103,8 @@ type ConditionStatus = 'pass' | 'fail' | 'unknown';
 interface Condition {
   name: string;
   status: ConditionStatus;
-  detail: string;
+  threshold: string;
+  current: string;
 }
 
 const FILTER_KEYWORDS: { key: string; matchFn: (fs: string) => boolean }[] = [
@@ -116,25 +117,39 @@ const FILTER_KEYWORDS: { key: string; matchFn: (fs: string) => boolean }[] = [
   { key: 'high_confirmation', matchFn: (fs) => /confirm/i.test(fs) },
 ];
 
+function fmtPct(n: number): string {
+  return (n * 100).toFixed(3) + '%';
+}
+
+function fmtDollar(n: number): string {
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+function fmtCooldownTime(seconds: number): string {
+  if (seconds <= 0) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 function evaluateConditions(algo: AlgoState): Condition[] {
   const fs = algo.filterStatus ?? '';
   const price = algo.currentPrice;
   const high = algo.high10min;
   const gap = high > 0 && price > 0 ? high - price : 0;
+  const gapPct = high > 0 ? gap / high : 0;
 
   // Determine which filter index is blocking (if any)
   let blockingIdx = -1; // -1 means all pass
   if (!algo.botEnabled) {
     blockingIdx = 0;
   } else if (fs) {
-    // Check which filter keyword matches
     for (let i = 2; i < FILTER_KEYWORDS.length; i++) {
       if (FILTER_KEYWORDS[i].matchFn(fs)) {
         blockingIdx = i;
         break;
       }
     }
-    // If filterStatus exists but no keyword matched, check conditionMet for price_below_high
     if (blockingIdx === -1 && !algo.conditionMet) {
       blockingIdx = 1;
     }
@@ -154,25 +169,49 @@ function evaluateConditions(algo: AlgoState): Condition[] {
     {
       name: 'Bot Enabled',
       status: algo.botEnabled ? 'pass' : 'fail',
-      detail: algo.botEnabled ? 'Bot is active' : 'Enable bot to trade',
+      threshold: '\u2014',
+      current: algo.botEnabled ? 'Active' : 'Disabled',
     },
     // 2. Price Below High
     {
       name: 'Price Below High',
       status: statusFor(1),
-      detail: (() => {
+      threshold: high > 0 ? fmtDollar(high) : '\u2014',
+      current: (() => {
         if (price <= 0 || high <= 0) return 'Waiting for data';
-        if (price < high) return `$${fmt(gap)} below high`;
-        return `Price needs to drop $${fmt(Math.abs(gap))}`;
+        if (price < high) {
+          return `${fmtDollar(gap)} below (${fmtPct(gapPct)})`;
+        }
+        return `Price ${fmtDollar(Math.abs(gap))} above high`;
       })(),
     },
     // 3. Min Gap
     {
       name: 'Min Gap',
       status: statusFor(2),
-      detail: (() => {
-        if (statusFor(2) === 'fail' && fs) return fs;
-        if (statusFor(2) === 'pass') return 'Gap sufficient';
+      threshold: (() => {
+        if (algo.minGapPct != null) {
+          const pctStr = fmtPct(algo.minGapPct);
+          if (algo.requiredGap != null && algo.requiredGap > 0) {
+            return `${pctStr} (${fmtDollar(algo.requiredGap)})`;
+          }
+          return pctStr;
+        }
+        return '\u2014';
+      })(),
+      current: (() => {
+        const curGapPct = algo.currentGapPct ?? (high > 0 ? gapPct : undefined);
+        const curGapDollar = algo.currentGap ?? (high > 0 ? gap : undefined);
+        if (statusFor(2) === 'pass' && curGapPct != null && curGapDollar != null) {
+          return `${fmtPct(curGapPct)} (${fmtDollar(curGapDollar)})`;
+        }
+        if (statusFor(2) === 'fail') {
+          if (curGapPct != null && algo.minGapPct != null) {
+            const needed = algo.minGapPct - curGapPct;
+            return `${fmtPct(curGapPct)} \u2014 needs ${fmtPct(needed)} more`;
+          }
+          if (fs) return fs;
+        }
         return 'Pending';
       })(),
     },
@@ -180,9 +219,15 @@ function evaluateConditions(algo: AlgoState): Condition[] {
     {
       name: 'Cancel Cooldown',
       status: statusFor(3),
-      detail: (() => {
-        if (statusFor(3) === 'fail' && fs) return fs;
-        if (statusFor(3) === 'pass') return 'No cooldown';
+      threshold: algo.cancelCooldownMins != null ? `${algo.cancelCooldownMins} min` : '\u2014',
+      current: (() => {
+        if (statusFor(3) === 'fail') {
+          if (algo.cooldownRemaining != null && algo.cooldownRemaining > 0) {
+            return `${fmtCooldownTime(algo.cooldownRemaining)} remaining`;
+          }
+          if (fs) return fs;
+        }
+        if (statusFor(3) === 'pass') return 'Clear';
         return 'Pending';
       })(),
     },
@@ -190,7 +235,17 @@ function evaluateConditions(algo: AlgoState): Condition[] {
     {
       name: 'Impulse Strength',
       status: statusFor(4),
-      detail: (() => {
+      threshold: algo.minImpulsePct != null ? fmtPct(algo.minImpulsePct) : '\u2014',
+      current: (() => {
+        if (algo.currentImpulse != null) {
+          if (statusFor(4) === 'pass') {
+            return fmtPct(algo.currentImpulse);
+          }
+          if (statusFor(4) === 'fail' && algo.minImpulsePct != null) {
+            const needed = algo.minImpulsePct - algo.currentImpulse;
+            return `${fmtPct(algo.currentImpulse)} \u2014 needs ${fmtPct(needed)} more`;
+          }
+        }
         if (statusFor(4) === 'fail' && fs) return fs;
         if (statusFor(4) === 'pass') return 'Impulse OK';
         return 'Pending';
@@ -200,19 +255,41 @@ function evaluateConditions(algo: AlgoState): Condition[] {
     {
       name: 'ATR Volatility',
       status: statusFor(5),
-      detail: (() => {
-        const atrStr = algo.currentAtr != null && algo.currentAtr > 0 ? ` (ATR: $${fmt(algo.currentAtr)})` : '';
-        if (statusFor(5) === 'fail' && fs) return fs + atrStr;
-        if (statusFor(5) === 'pass') return 'Volatility OK' + atrStr;
-        return 'Pending' + atrStr;
+      threshold: algo.maxAtrUsdt != null ? fmtDollar(algo.maxAtrUsdt) : '\u2014',
+      current: (() => {
+        const atr = algo.currentAtr;
+        if (atr != null && atr > 0) {
+          if (statusFor(5) === 'pass') {
+            return fmtDollar(atr);
+          }
+          if (statusFor(5) === 'fail' && algo.maxAtrUsdt != null) {
+            const over = atr - algo.maxAtrUsdt;
+            return `${fmtDollar(atr)} \u2014 ${fmtDollar(over)} over limit`;
+          }
+          return fmtDollar(atr);
+        }
+        if (statusFor(5) === 'fail' && fs) return fs;
+        if (statusFor(5) === 'pass') return 'Volatility OK';
+        return 'Pending';
       })(),
     },
     // 7. High Confirmation
     {
       name: 'High Confirmation',
       status: statusFor(6),
-      detail: (() => {
-        if (statusFor(6) === 'fail' && fs) return fs;
+      threshold: (() => {
+        if (algo.highConfirmSeconds != null) {
+          return algo.highConfirmSeconds === 0 ? 'Off' : `${algo.highConfirmSeconds}s`;
+        }
+        return '\u2014';
+      })(),
+      current: (() => {
+        if (statusFor(6) === 'fail') {
+          if (algo.highConfirmRemaining != null && algo.highConfirmRemaining > 0) {
+            return `${algo.highConfirmRemaining}s remaining`;
+          }
+          if (fs) return fs;
+        }
         if (statusFor(6) === 'pass') return 'Confirmed';
         return 'Pending';
       })(),
@@ -365,7 +442,8 @@ export default function ConditionsTable({ algoState, token, onActivity }: Props)
               <tr className="text-[#64748b] text-xs uppercase tracking-wider">
                 <th className="text-left pb-2 font-medium">Condition</th>
                 <th className="text-center pb-2 font-medium w-16">Status</th>
-                <th className="text-left pb-2 font-medium">Details</th>
+                <th className="text-left pb-2 font-medium">Threshold</th>
+                <th className="text-left pb-2 font-medium">Current</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1E2A3D]/40">
@@ -375,7 +453,8 @@ export default function ConditionsTable({ algoState, token, onActivity }: Props)
                   <td className="py-2 text-center">
                     <span className={`inline-block w-2.5 h-2.5 rounded-full ${dotColor(c.status)}`} />
                   </td>
-                  <td className={`py-2 pl-3 text-xs ${detailColor(c.status)}`}>{c.detail}</td>
+                  <td className="py-2 pl-3 text-xs text-[#94a3b8] font-mono">{c.threshold}</td>
+                  <td className={`py-2 pl-3 text-xs ${detailColor(c.status)}`}>{c.current}</td>
                 </tr>
               ))}
             </tbody>

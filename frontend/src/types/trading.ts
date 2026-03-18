@@ -19,6 +19,21 @@ export interface AlgoState {
   currentAtr?: number;  // average true range of last candle buffer (0 or absent if insufficient data)
   positionSizeUsdt?: number; // configured position size in USDT
   leverage?: number;         // configured leverage multiplier
+
+  // Filter thresholds (from config)
+  minGapPct?: number;
+  minImpulsePct?: number;
+  maxAtrUsdt?: number;
+  cancelCooldownMins?: number;
+  highConfirmSeconds?: number;
+
+  // Current filter values (live)
+  currentGap?: number;
+  currentGapPct?: number;
+  requiredGap?: number;
+  currentImpulse?: number;
+  cooldownRemaining?: number;
+  highConfirmRemaining?: number;
 }
 
 // Candlestick data
