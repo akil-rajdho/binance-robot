@@ -105,6 +105,7 @@ interface Condition {
   status: ConditionStatus;
   threshold: string;
   current: string;
+  target: string;
 }
 
 const FILTER_KEYWORDS: { key: string; matchFn: (fs: string) => boolean }[] = [
@@ -171,6 +172,7 @@ function evaluateConditions(algo: AlgoState): Condition[] {
       status: algo.botEnabled ? 'pass' : 'fail',
       threshold: '\u2014',
       current: algo.botEnabled ? 'Active' : 'Disabled',
+      target: algo.botEnabled ? '\u2014' : 'Enable bot',
     },
     // 2. Price Below High
     {
@@ -179,10 +181,12 @@ function evaluateConditions(algo: AlgoState): Condition[] {
       threshold: high > 0 ? fmtDollar(high) : '\u2014',
       current: (() => {
         if (price <= 0 || high <= 0) return 'Waiting for data';
-        if (price < high) {
-          return `${fmtDollar(gap)} below (${fmtPct(gapPct)})`;
-        }
-        return `Price ${fmtDollar(Math.abs(gap))} above high`;
+        if (price < high) return `${fmtDollar(gap)} below (${fmtPct(gapPct)})`;
+        return `${fmtDollar(Math.abs(gap))} above high`;
+      })(),
+      target: (() => {
+        if (price >= high && high > 0) return `Drop ${fmtDollar(price - high)}`;
+        return '\u2014';
       })(),
     },
     // 3. Min Gap
@@ -202,17 +206,19 @@ function evaluateConditions(algo: AlgoState): Condition[] {
       current: (() => {
         const curGapPct = algo.currentGapPct ?? (high > 0 ? gapPct : undefined);
         const curGapDollar = algo.currentGap ?? (high > 0 ? gap : undefined);
-        if (statusFor(2) === 'pass' && curGapPct != null && curGapDollar != null) {
+        if (curGapPct != null && curGapDollar != null) {
           return `${fmtPct(curGapPct)} (${fmtDollar(curGapDollar)})`;
         }
-        if (statusFor(2) === 'fail') {
-          if (curGapPct != null && algo.minGapPct != null) {
-            const needed = algo.minGapPct - curGapPct;
-            return `${fmtPct(curGapPct)} \u2014 needs ${fmtPct(needed)} more`;
-          }
-          if (fs) return fs;
-        }
         return 'Pending';
+      })(),
+      target: (() => {
+        const curGapPct = algo.currentGapPct ?? (high > 0 ? gapPct : undefined);
+        if (statusFor(2) === 'fail' && curGapPct != null && algo.minGapPct != null) {
+          const neededPct = algo.minGapPct - curGapPct;
+          const neededDollar = (algo.requiredGap ?? 0) - (algo.currentGap ?? gap);
+          return `${fmtPct(neededPct)} (${fmtDollar(Math.max(0, neededDollar))}) more`;
+        }
+        return '\u2014';
       })(),
     },
     // 4. Cancel Cooldown
@@ -230,6 +236,12 @@ function evaluateConditions(algo: AlgoState): Condition[] {
         if (statusFor(3) === 'pass') return 'Clear';
         return 'Pending';
       })(),
+      target: (() => {
+        if (statusFor(3) === 'fail' && algo.cooldownRemaining != null && algo.cooldownRemaining > 0) {
+          return `Wait ${fmtCooldownTime(algo.cooldownRemaining)}`;
+        }
+        return '\u2014';
+      })(),
     },
     // 5. Impulse Strength
     {
@@ -237,18 +249,16 @@ function evaluateConditions(algo: AlgoState): Condition[] {
       status: statusFor(4),
       threshold: algo.minImpulsePct != null ? fmtPct(algo.minImpulsePct) : '\u2014',
       current: (() => {
-        if (algo.currentImpulse != null) {
-          if (statusFor(4) === 'pass') {
-            return fmtPct(algo.currentImpulse);
-          }
-          if (statusFor(4) === 'fail' && algo.minImpulsePct != null) {
-            const needed = algo.minImpulsePct - algo.currentImpulse;
-            return `${fmtPct(algo.currentImpulse)} \u2014 needs ${fmtPct(needed)} more`;
-          }
-        }
-        if (statusFor(4) === 'fail' && fs) return fs;
-        if (statusFor(4) === 'pass') return 'Impulse OK';
+        if (algo.currentImpulse != null) return fmtPct(algo.currentImpulse);
+        if (statusFor(4) === 'pass') return 'OK';
         return 'Pending';
+      })(),
+      target: (() => {
+        if (statusFor(4) === 'fail' && algo.currentImpulse != null && algo.minImpulsePct != null) {
+          const needed = algo.minImpulsePct - algo.currentImpulse;
+          return `${fmtPct(needed)} more`;
+        }
+        return '\u2014';
       })(),
     },
     // 6. ATR Volatility
@@ -258,19 +268,16 @@ function evaluateConditions(algo: AlgoState): Condition[] {
       threshold: algo.maxAtrUsdt != null ? fmtDollar(algo.maxAtrUsdt) : '\u2014',
       current: (() => {
         const atr = algo.currentAtr;
-        if (atr != null && atr > 0) {
-          if (statusFor(5) === 'pass') {
-            return fmtDollar(atr);
-          }
-          if (statusFor(5) === 'fail' && algo.maxAtrUsdt != null) {
-            const over = atr - algo.maxAtrUsdt;
-            return `${fmtDollar(atr)} \u2014 ${fmtDollar(over)} over limit`;
-          }
-          return fmtDollar(atr);
-        }
-        if (statusFor(5) === 'fail' && fs) return fs;
-        if (statusFor(5) === 'pass') return 'Volatility OK';
+        if (atr != null && atr > 0) return fmtDollar(atr);
+        if (statusFor(5) === 'pass') return 'OK';
         return 'Pending';
+      })(),
+      target: (() => {
+        const atr = algo.currentAtr;
+        if (statusFor(5) === 'fail' && atr != null && algo.maxAtrUsdt != null) {
+          return `${fmtDollar(atr - algo.maxAtrUsdt)} over limit`;
+        }
+        return '\u2014';
       })(),
     },
     // 7. High Confirmation
@@ -284,14 +291,17 @@ function evaluateConditions(algo: AlgoState): Condition[] {
         return '\u2014';
       })(),
       current: (() => {
-        if (statusFor(6) === 'fail') {
-          if (algo.highConfirmRemaining != null && algo.highConfirmRemaining > 0) {
-            return `${algo.highConfirmRemaining}s remaining`;
-          }
-          if (fs) return fs;
+        if (statusFor(6) === 'fail' && algo.highConfirmRemaining != null && algo.highConfirmRemaining > 0) {
+          return `${Math.ceil(algo.highConfirmRemaining)}s remaining`;
         }
         if (statusFor(6) === 'pass') return 'Confirmed';
         return 'Pending';
+      })(),
+      target: (() => {
+        if (statusFor(6) === 'fail' && algo.highConfirmRemaining != null && algo.highConfirmRemaining > 0) {
+          return `Wait ${Math.ceil(algo.highConfirmRemaining)}s`;
+        }
+        return '\u2014';
       })(),
     },
   ];
@@ -444,6 +454,7 @@ export default function ConditionsTable({ algoState, token, onActivity }: Props)
                 <th className="text-center pb-2 font-medium w-16">Status</th>
                 <th className="text-left pb-2 font-medium">Threshold</th>
                 <th className="text-left pb-2 font-medium">Current</th>
+                <th className="text-left pb-2 font-medium">Target</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1E2A3D]/40">
@@ -455,6 +466,7 @@ export default function ConditionsTable({ algoState, token, onActivity }: Props)
                   </td>
                   <td className="py-2 pl-3 text-xs text-[#94a3b8] font-mono">{c.threshold}</td>
                   <td className={`py-2 pl-3 text-xs ${detailColor(c.status)}`}>{c.current}</td>
+                  <td className={`py-2 pl-3 text-xs ${c.target === '\u2014' ? 'text-[#4b5563]' : 'text-orange-400'}`}>{c.target}</td>
                 </tr>
               ))}
             </tbody>
