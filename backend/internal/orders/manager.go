@@ -152,7 +152,10 @@ func (m *Manager) GetOpenPositions(_ context.Context) ([]algorithm.OpenPosition,
 	}
 	var result []algorithm.OpenPosition
 	for _, p := range positions {
-		if !strings.EqualFold(p.Market, m.market) {
+		// WhiteBit returns "BTC-PERP" but we use "BTC_PERP" — normalize both
+		normalizedPos := strings.ReplaceAll(strings.ToUpper(p.Market), "-", "_")
+		normalizedWant := strings.ReplaceAll(strings.ToUpper(m.market), "-", "_")
+		if normalizedPos != normalizedWant {
 			fmt.Printf("[Orders] GetOpenPositions: skipping position market=%s (want %s)\n", p.Market, m.market)
 			continue
 		}

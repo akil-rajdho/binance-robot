@@ -7,12 +7,12 @@ interface Props {
   onWhyClick: (trade: Trade) => void;
 }
 
-function formatTime(iso: string): string {
+function formatDateTime(iso: string): { date: string; time: string } {
   const d = new Date(iso);
-  const hh = d.getHours().toString().padStart(2, '0');
-  const mm = d.getMinutes().toString().padStart(2, '0');
-  const ss = d.getSeconds().toString().padStart(2, '0');
-  return `${hh}:${mm}:${ss}`;
+  return {
+    date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    time: d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+  };
 }
 
 function formatPrice(price: number): string {
@@ -71,9 +71,10 @@ export default function OrderHistory({ trades, onWhyClick }: Props) {
               >
                 {/* Top row: time + status */}
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs text-[#94a3b8] tabular-nums">
-                    {formatTime(trade.entryTime)}
-                  </span>
+                  <div>
+                    <span className="font-mono text-xs text-[#e2e8f0] tabular-nums">{formatDateTime(trade.entryTime).date}</span>
+                    <span className="font-mono text-xs text-[#94a3b8] tabular-nums ml-1.5">{formatDateTime(trade.entryTime).time}</span>
+                  </div>
                   <span
                     className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold whitespace-nowrap ${STATUS_STYLES[trade.status]}`}
                   >
@@ -130,7 +131,7 @@ export default function OrderHistory({ trades, onWhyClick }: Props) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[#1E2A3D]">
-                  <th className="text-left py-2 pr-3 text-xs font-medium text-[#94a3b8] whitespace-nowrap">Time</th>
+                  <th className="text-left py-2 pr-3 text-xs font-medium text-[#94a3b8] whitespace-nowrap">Date / Time</th>
                   <th className="text-left py-2 pr-3 text-xs font-medium text-[#94a3b8]">Side</th>
                   <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">Order / Fill</th>
                   <th className="text-right py-2 pr-3 text-xs font-medium text-[#94a3b8]">Exit</th>
@@ -143,8 +144,9 @@ export default function OrderHistory({ trades, onWhyClick }: Props) {
               <tbody>
                 {displayTrades.map((trade) => (
                   <tr key={trade.id} className="border-b border-[#1E2A3D]/50 hover:bg-[#1A2332]/50 transition-colors">
-                    <td className="py-2 pr-3 text-[#94a3b8] tabular-nums whitespace-nowrap font-mono text-xs">
-                      {formatTime(trade.entryTime)}
+                    <td className="py-2 pr-3 whitespace-nowrap">
+                      <p className="text-[#e2e8f0] text-xs font-medium">{formatDateTime(trade.entryTime).date}</p>
+                      <p className="text-[#4b5563] text-xs font-mono mt-0.5">{formatDateTime(trade.entryTime).time}</p>
                     </td>
                     <td className="py-2 pr-3">
                       <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-semibold bg-red-900/30 text-red-400 border border-red-800">
@@ -157,7 +159,7 @@ export default function OrderHistory({ trades, onWhyClick }: Props) {
                         : formatPrice(trade.entryPrice || trade.orderPrice)}
                     </td>
                     <td className="py-2 pr-3 text-right font-mono text-[#94a3b8] whitespace-nowrap">
-                      {trade.exitPrice !== undefined && trade.exitPrice !== null
+                      {trade.exitPrice != null && trade.exitPrice > 0
                         ? formatPrice(trade.exitPrice)
                         : '–'}
                     </td>
