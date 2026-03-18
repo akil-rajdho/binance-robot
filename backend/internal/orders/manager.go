@@ -144,6 +144,32 @@ func (m *Manager) IsOrderFilled2(_ context.Context, orderID int64) (filled bool,
 	return found, nil
 }
 
+// GetOpenPositions returns all open short positions for the market.
+func (m *Manager) GetOpenPositions(_ context.Context) ([]algorithm.OpenPosition, error) {
+	positions, err := m.client.GetPositions()
+	if err != nil {
+		return nil, fmt.Errorf("orders: GetOpenPositions: %w", err)
+	}
+	var result []algorithm.OpenPosition
+	for _, p := range positions {
+		if !strings.EqualFold(p.Market, m.market) {
+			continue
+		}
+		amount, _ := strconv.ParseFloat(p.Amount, 64)
+		basePrice, _ := strconv.ParseFloat(p.BasePrice, 64)
+		if amount == 0 {
+			continue
+		}
+		result = append(result, algorithm.OpenPosition{
+			Market:    p.Market,
+			Side:      strings.ToLower(p.Side),
+			Amount:    amount,
+			BasePrice: basePrice,
+		})
+	}
+	return result, nil
+}
+
 // GetActiveShortOrders returns all active sell orders for the market.
 // Used by the state machine to detect manually placed orders and prevent duplicate order placement.
 func (m *Manager) GetActiveShortOrders(_ context.Context) ([]algorithm.ActiveOrder, error) {

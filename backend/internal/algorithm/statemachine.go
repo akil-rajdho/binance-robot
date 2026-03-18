@@ -96,6 +96,14 @@ type ActiveOrder struct {
 	Side    string // "buy" or "sell"
 }
 
+// OpenPosition represents an open position detected on the exchange.
+type OpenPosition struct {
+	Market    string
+	Side      string  // "short" or "long"
+	Amount    float64 // BTC amount
+	BasePrice float64 // average entry price
+}
+
 // OrderManager is the interface the state machine calls to place/cancel orders.
 type OrderManager interface {
 	PlaceShortLimitOrder(ctx context.Context, price float64, amount string) (orderID int64, err error)
@@ -110,6 +118,8 @@ type OrderManager interface {
 	PlaceMarketClose(ctx context.Context) (orderID int64, err error)
 	// GetActiveShortOrders returns all active sell orders for the market.
 	GetActiveShortOrders(ctx context.Context) ([]ActiveOrder, error)
+	// GetOpenPositions returns open short positions on the exchange.
+	GetOpenPositions(ctx context.Context) ([]OpenPosition, error)
 }
 
 // OpenTrade holds the fields the state machine needs to recover an in-flight trade
@@ -903,7 +913,97 @@ func (sm *StateMachine) SyncOnEnable() {
 	}
 
 	if len(activeOrders) == 0 {
-		log.Println("[StateMachine] SyncOnEnable: no active orders found — remaining IDLE")
+		log.Println("[StateMachine] SyncOnEnable: no active orders found — checking for open positions...")
+
+		// Third: check WhiteBit for any open positions we're not tracking.
+		log.Println("[StateMachine] SyncOnEnable: checking WhiteBit for open positions...")
+		positions, posErr := sm.orderMgr.GetOpenPositions(sm.ctx)
+		if posErr != nil {
+			log.Printf("[StateMachine] SyncOnEnable: GetOpenPositions error: %v", posErr)
+			return
+		}
+
+		// Look for a short position
+		var shortPos *OpenPosition
+		for i, p := range positions {
+			if p.Side == "short" {
+				shortPos = &positions[i]
+				break
+			}
+		}
+
+		if shortPos == nil {
+			log.Println("[StateMachine] SyncOnEnable: no open positions found — remaining IDLE")
+			return
+		}
+
+		log.Printf("[StateMachine] SyncOnEnable: found untracked short position: %.3f BTC @ $%.2f", shortPos.Amount, shortPos.BasePrice)
+
+		// Adopt the position: create a DB trade entry and transition to POSITION_OPEN
+		entryPrice := shortPos.BasePrice
+		tpPrice := entryPrice - tpDist
+		slPrice := entryPrice + slDist
+
+		snapshot := ReasoningSnapshot{
+			Timestamp:        time.Now(),
+			CurrentPrice:     price,
+			High10min:        high,
+			Difference:       high - price,
+			ConditionMet:     price > 0 && high > 0 && price < high,
+			OrderPrice:       entryPrice,
+			TPPrice:          tpPrice,
+			SLPrice:          slPrice,
+			PositionSizeUSDT: posSize,
+			Leverage:         leverage,
+		}
+		tradeID, dbErr := sm.db.SaveReasoningSnapshot(snapshot, 0) // orderID 0 since position was external
+		if dbErr != nil {
+			log.Printf("[StateMachine] SyncOnEnable: SaveReasoningSnapshot for position error: %v", dbErr)
+			return
+		}
+
+		// Place TP and SL orders for the adopted position
+		tpOrderID, tpErr := sm.orderMgr.PlaceTakeProfit(sm.ctx, 0, tpPrice)
+		if tpErr != nil {
+			log.Printf("[StateMachine] SyncOnEnable: PlaceTakeProfit error: %v", tpErr)
+		}
+		slOrderID, slErr := sm.orderMgr.PlaceStopLoss(sm.ctx, 0, slPrice)
+		if slErr != nil {
+			log.Printf("[StateMachine] SyncOnEnable: PlaceStopLoss error: %v", slErr)
+		}
+
+		if tpErr != nil || slErr != nil {
+			log.Printf("[StateMachine] SyncOnEnable: failed to place TP/SL for adopted position — cannot track safely")
+			return
+		}
+
+		// Update DB with TP/SL order IDs
+		if dbErr := sm.db.UpdateOrderIDs(tradeID, tpOrderID, slOrderID); dbErr != nil {
+			log.Printf("[StateMachine] SyncOnEnable: UpdateOrderIDs error: %v", dbErr)
+		}
+		if dbErr := sm.db.UpdateEntryPrice(tradeID, entryPrice); dbErr != nil {
+			log.Printf("[StateMachine] SyncOnEnable: UpdateEntryPrice error: %v", dbErr)
+		}
+
+		sm.mu.Lock()
+		if sm.state != StateIdle {
+			sm.mu.Unlock()
+			log.Printf("[StateMachine] SyncOnEnable: state changed while adopting position — skipping")
+			return
+		}
+		sm.state = StatePositionOpen
+		sm.activeOrderID = 0
+		sm.activeOrderPrice = entryPrice
+		sm.activeTradeID = tradeID
+		sm.tpOrderID = tpOrderID
+		sm.slOrderID = slOrderID
+		sm.tpPrice = tpPrice
+		sm.slPrice = slPrice
+		algoState := sm.buildAlgoState()
+		sm.mu.Unlock()
+
+		log.Printf("[StateMachine] SyncOnEnable: adopted position @ $%.2f → POSITION_OPEN (TP=$%.2f, SL=$%.2f)", entryPrice, tpPrice, slPrice)
+		sm.notifyStateChange(algoState)
 		return
 	}
 
