@@ -114,8 +114,8 @@ type OpenPosition struct {
 type OrderManager interface {
 	PlaceShortLimitOrder(ctx context.Context, price float64, amount string) (orderID int64, err error)
 	CancelOrder(ctx context.Context, orderID int64) error
-	PlaceTakeProfit(ctx context.Context, positionID int64, price float64) (orderID int64, err error)
-	PlaceStopLoss(ctx context.Context, positionID int64, price float64) (orderID int64, err error)
+	PlaceTakeProfit(ctx context.Context, positionID int64, price float64, amount string) (orderID int64, err error)
+	PlaceStopLoss(ctx context.Context, positionID int64, price float64, amount string) (orderID int64, err error)
 	// IsOrderFilled returns (filled, cancelled, fillPrice, error).
 	// filled=true: order was executed. cancelled=true: order is gone but not executed.
 	// Both false means the order is still active.
@@ -374,13 +374,13 @@ func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
 	tpPrice := roundPrice(entryPrice - tpDist)
 	slPrice := roundPrice(entryPrice + slDist)
 
-	tpID, err := sm.orderMgr.PlaceTakeProfit(ctx, orderID, tpPrice)
+	tpID, err := sm.orderMgr.PlaceTakeProfit(ctx, orderID, tpPrice, "0")
 	if err != nil {
 		log.Printf("[StateMachine] PlaceTakeProfit error: %v", err)
 		return
 	}
 
-	slID, err := sm.orderMgr.PlaceStopLoss(ctx, orderID, slPrice)
+	slID, err := sm.orderMgr.PlaceStopLoss(ctx, orderID, slPrice, "0")
 	if err != nil {
 		log.Printf("[StateMachine] PlaceStopLoss error: %v", err)
 		return
@@ -578,7 +578,7 @@ func (sm *StateMachine) forceClosePosition(ctx context.Context) {
 	}
 
 	// Place a new tight limit BUY at currentPrice + $15 to lock in profit
-	newTPOrderID, err := sm.orderMgr.PlaceTakeProfit(ctx, 0, tightTP)
+	newTPOrderID, err := sm.orderMgr.PlaceTakeProfit(ctx, 0, tightTP, "0")
 	if err != nil {
 		log.Printf("[StateMachine] ERROR: failed to place tight TP at $%.2f: %v", tightTP, err)
 		return
@@ -999,16 +999,22 @@ func (sm *StateMachine) SyncOnEnable() {
 		// For adopted positions, TP/SL must account for current price.
 		// A standard TP at entry-70 would be above market if the position is already in profit,
 		// causing the TP buy-limit to fill immediately and close the position.
-		// Instead: place TP below current price, SL above entry.
-		tpPrice := roundPrice(price - tpDist)       // TP below current market price
-		slPrice := roundPrice(entryPrice + slDist)   // SL above entry (standard)
-
-		// Safety: if TP would be >= current price (position is losing), use entry-based TP
-		if tpPrice >= price {
-			tpPrice = roundPrice(entryPrice - tpDist)
+		// If we don't have a current price yet (startup before price feed), use entry price.
+		refPrice := price
+		if refPrice <= 0 {
+			refPrice = entryPrice
 		}
 
-		log.Printf("[StateMachine] SyncOnEnable: adopting with TP=$%.1f SL=$%.1f (entry=$%.2f, current=$%.2f)", tpPrice, slPrice, entryPrice, price)
+		tpPrice := roundPrice(refPrice - tpDist)     // TP below reference price
+		slPrice := roundPrice(entryPrice + slDist)    // SL above entry (standard)
+
+		// Safety: ensure TP is below current market (if we have market data)
+		if price > 0 && tpPrice >= price {
+			tpPrice = roundPrice(price - tpDist)
+		}
+
+		posAmount := fmt.Sprintf("%.3f", shortPos.Amount) // actual BTC amount, not "0"
+		log.Printf("[StateMachine] SyncOnEnable: adopting with TP=$%.1f SL=$%.1f amount=%s (entry=$%.2f, current=$%.2f)", tpPrice, slPrice, posAmount, entryPrice, refPrice)
 
 		snapshot := ReasoningSnapshot{
 			Timestamp:        time.Now(),
@@ -1028,12 +1034,12 @@ func (sm *StateMachine) SyncOnEnable() {
 			return
 		}
 
-		// Place TP and SL orders for the adopted position
-		tpOrderID, tpErr := sm.orderMgr.PlaceTakeProfit(sm.ctx, 0, tpPrice)
+		// Place TP and SL orders for the adopted position (pass actual amount, not "0")
+		tpOrderID, tpErr := sm.orderMgr.PlaceTakeProfit(sm.ctx, 0, tpPrice, posAmount)
 		if tpErr != nil {
 			log.Printf("[StateMachine] SyncOnEnable: PlaceTakeProfit error: %v", tpErr)
 		}
-		slOrderID, slErr := sm.orderMgr.PlaceStopLoss(sm.ctx, 0, slPrice)
+		slOrderID, slErr := sm.orderMgr.PlaceStopLoss(sm.ctx, 0, slPrice, posAmount)
 		if slErr != nil {
 			log.Printf("[StateMachine] SyncOnEnable: PlaceStopLoss error: %v", slErr)
 		}
