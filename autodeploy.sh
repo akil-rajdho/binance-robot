@@ -17,7 +17,12 @@ docker compose -p binance-robot up -d --no-deps --force-recreate frontend postgr
 echo "--- Container status:"
 docker compose -p binance-robot ps
 
-echo "--- Scheduling backend restart in 3 seconds..."
-nohup sh -c 'sleep 3 && cd /project && docker compose -p binance-robot up -d --no-deps --force-recreate backend' >/dev/null 2>&1 &
+echo "--- Scheduling backend restart via sidecar container..."
+docker run --rm -d \
+  --name deploy-backend-restart \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /root/binance-robot:/project \
+  binance-robot-backend:latest \
+  sh -c 'sleep 5 && cd /project && docker compose -p binance-robot up -d --no-deps --force-recreate backend'
 
-echo "=== Deploy complete (backend will restart momentarily) ==="
+echo "=== Deploy complete (backend will restart in ~5 seconds) ==="
