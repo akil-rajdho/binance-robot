@@ -9,9 +9,9 @@ echo "--- Pulling latest changes..."
 git pull origin main
 
 echo "--- Rebuilding and restarting all containers..."
-docker compose up --build -d
+docker compose -p binance-robot up --build -d
 
 echo "--- Container status:"
-docker compose ps
+docker compose -p binance-robot ps
 
 echo "=== Deploy complete at $(date) ==="
