@@ -6,14 +6,13 @@ import Link from 'next/link';
 import { useAuth } from '../src/contexts/AuthContext';
 import { useTrading } from '../src/hooks/useTrading';
 import PriceTicker from '../src/components/PriceTicker';
-import AlgorithmBrain from '../src/components/AlgorithmBrain';
 import PnlSummary from '../src/components/PnlSummary';
+import ConditionsTable from '../src/components/ConditionsTable';
 import ActivePosition from '../src/components/ActivePosition';
 import OrderHistory from '../src/components/OrderHistory';
 import ReasoningModal from '../src/components/ReasoningModal';
 import Settings from '../src/components/Settings';
 import PriceChart from '../src/components/PriceChart';
-import AlgorithmReasoning from '../src/components/AlgorithmReasoning';
 import { Trade } from '../src/types/trading';
 
 export default function Home() {
@@ -69,9 +68,7 @@ export default function Home() {
 
   const dailyLossLimitHit = false;
 
-  const high10min = algoState?.high10min ?? 0;
   const conditionMet = algoState?.conditionMet ?? false;
-  const nextOrderPrice = algoState?.nextOrderPrice ?? 0;
 
   return (
     <div className="min-h-screen bg-[#070B14]">
@@ -138,27 +135,30 @@ export default function Home() {
       )}
 
       <main className="mx-auto max-w-screen-2xl space-y-4 p-2 pb-20 md:p-6 md:pb-6">
-        {/* Row 1: PriceTicker | PnlSummary | AlgorithmBrain */}
+        {/* Row 1: PriceTicker (2/3) | PnlSummary (1/3) */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <PriceTicker
-            currentPrice={currentPrice}
-            high10min={high10min}
-            conditionMet={conditionMet}
-            nextOrderPrice={nextOrderPrice}
-            botEnabled={botEnabled}
-            connected={connected}
-          />
-          <PnlSummary
-            todayPnl={todayPnl}
-            totalPnl={totalPnl}
-            winRate={winRate}
-            tradeCount={trades.length}
-          />
-          <AlgorithmBrain algoState={algoState} />
+          <div className="md:col-span-2">
+            <PriceTicker
+              currentPrice={currentPrice}
+              avgDailyPrice={0}
+              maxDailyPrice={0}
+              conditionMet={conditionMet}
+              botEnabled={botEnabled}
+              connected={connected}
+            />
+          </div>
+          <div className="md:col-span-1">
+            <PnlSummary
+              todayPnl={todayPnl}
+              totalPnl={totalPnl}
+              winRate={winRate}
+              tradeCount={trades.length}
+            />
+          </div>
         </div>
 
-        {/* Row 2: Algorithm Reasoning */}
-        <AlgorithmReasoning token={token} onActivity={updateActivity} algoState={algoState} />
+        {/* Row 2: Conditions Table */}
+        <ConditionsTable algoState={algoState} token={token} onActivity={updateActivity} />
 
         {/* Row 3: ActivePosition (1/3) | OrderHistory (2/3) */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -177,7 +177,7 @@ export default function Home() {
         <div>
           <PriceChart
             candles={candles}
-            high10min={high10min}
+            high10min={algoState?.high10min ?? 0}
             trades={trades}
           />
         </div>

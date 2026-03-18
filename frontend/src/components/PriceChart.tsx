@@ -16,11 +16,11 @@ import { Candle, Trade } from '../types/trading';
 
 interface Props {
   candles: Candle[];
-  high10min: number;
+  high10min?: number;
   trades: Trade[];
 }
 
-export default function PriceChart({ candles, high10min, trades }: Props) {
+export default function PriceChart({ candles, high10min = 0, trades }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const areaSeriesRef = useRef<ISeriesApi<'Area'> | null>(null);

@@ -4,9 +4,9 @@ import { useRef, useEffect, useState } from 'react';
 
 interface Props {
   currentPrice: number;
-  high10min: number;
+  avgDailyPrice: number;
+  maxDailyPrice: number;
   conditionMet: boolean;
-  nextOrderPrice: number;
   botEnabled: boolean;
   connected: boolean;
 }
@@ -17,9 +17,9 @@ function formatPrice(price: number): string {
 
 export default function PriceTicker({
   currentPrice,
-  high10min,
+  avgDailyPrice,
+  maxDailyPrice,
   conditionMet,
-  nextOrderPrice,
   botEnabled,
   connected,
 }: Props) {
@@ -46,8 +46,8 @@ export default function PriceTicker({
       : 'text-[#4b5563]';
 
   return (
-    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-2 md:p-4 flex flex-col gap-2">
-      {/* Top row: connection status */}
+    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-2 md:p-4 flex flex-col gap-3">
+      {/* Top row: label + connection status */}
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-[#94a3b8] uppercase tracking-wide">BTC/USDT</span>
         <div className="flex items-center gap-1.5">
@@ -60,21 +60,37 @@ export default function PriceTicker({
         </div>
       </div>
 
-      {/* Price row */}
-      <div className="flex items-baseline gap-2">
-        <span className="text-2xl font-bold text-white tabular-nums md:text-3xl">
-          {formatPrice(currentPrice)}
-        </span>
-        <span className={`text-lg font-semibold ${directionColor}`}>{directionArrow}</span>
+      {/* Three-column price display */}
+      <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-[#1E2A3D]">
+        {/* Current Price */}
+        <div className="flex flex-col gap-1 py-2 md:py-0 md:pr-4">
+          <span className="text-xs font-medium text-[#94a3b8] uppercase tracking-wide">Current Price</span>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-bold text-white tabular-nums md:text-3xl">
+              {formatPrice(currentPrice)}
+            </span>
+            <span className={`text-lg font-semibold ${directionColor}`}>{directionArrow}</span>
+          </div>
+        </div>
+
+        {/* Avg Daily Price */}
+        <div className="flex flex-col gap-1 py-2 md:py-0 md:px-4">
+          <span className="text-xs font-medium text-[#94a3b8] uppercase tracking-wide">Avg Daily</span>
+          <span className="text-2xl font-bold text-white tabular-nums md:text-3xl">
+            {formatPrice(avgDailyPrice)}
+          </span>
+        </div>
+
+        {/* Max Daily Price */}
+        <div className="flex flex-col gap-1 py-2 md:py-0 md:pl-4">
+          <span className="text-xs font-medium text-[#94a3b8] uppercase tracking-wide">Max Daily</span>
+          <span className="text-2xl font-bold text-white tabular-nums md:text-3xl">
+            {formatPrice(maxDailyPrice)}
+          </span>
+        </div>
       </div>
 
-      {/* 10m high */}
-      <div className="text-sm text-[#94a3b8]">
-        <span className="font-medium text-[#e2e8f0]">10m High:</span>{' '}
-        <span className="tabular-nums">{formatPrice(high10min)}</span>
-      </div>
-
-      {/* Condition status */}
+      {/* Condition badges */}
       <div className="flex items-center gap-2 flex-wrap">
         {conditionMet ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-green-900/30 px-2.5 py-0.5 text-xs font-semibold text-green-400 border border-green-800">
@@ -92,16 +108,6 @@ export default function PriceTicker({
           </span>
         )}
       </div>
-
-      {/* Next order price */}
-      {conditionMet && nextOrderPrice > 0 && (
-        <div className="text-sm text-[#94a3b8]">
-          <span className="font-medium">Next:</span>{' '}
-          <span className="font-semibold text-orange-400">
-            SHORT @ {formatPrice(nextOrderPrice)}
-          </span>
-        </div>
-      )}
     </div>
   );
 }
