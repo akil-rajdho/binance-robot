@@ -293,6 +293,7 @@ export default function HistoryPage() {
                       <th className="text-right px-4 py-3 text-xs font-medium text-[#94a3b8] uppercase tracking-wide whitespace-nowrap">Entry</th>
                       <th className="text-right px-4 py-3 text-xs font-medium text-[#94a3b8] uppercase tracking-wide">TP</th>
                       <th className="text-right px-4 py-3 text-xs font-medium text-[#94a3b8] uppercase tracking-wide">SL</th>
+                      <th className="text-right px-4 py-3 text-xs font-medium text-[#94a3b8] uppercase tracking-wide whitespace-nowrap">Cancel @</th>
                       <th className="text-right px-4 py-3 text-xs font-medium text-[#94a3b8] uppercase tracking-wide whitespace-nowrap">Exit Price</th>
                       <th className="text-right px-4 py-3 text-xs font-medium text-[#94a3b8] uppercase tracking-wide">P&amp;L</th>
                       <th className="text-left px-4 py-3 text-xs font-medium text-[#94a3b8] uppercase tracking-wide">Status</th>
@@ -340,7 +341,14 @@ export default function HistoryPage() {
                             {reasoning ? fmt(reasoning.sl_price) : fmt(trade.slPrice)}
                           </td>
                           <td className="px-4 py-3 text-right font-mono whitespace-nowrap text-xs">
-                            {trade.exitPrice != null ? (
+                            {trade.status === 'CANCELLED' && trade.cancelPrice && trade.cancelPrice > 0 ? (
+                              <span className="text-orange-400">{fmt(trade.cancelPrice)}</span>
+                            ) : (
+                              <span className="text-[#4b5563]">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right font-mono whitespace-nowrap text-xs">
+                            {trade.exitPrice != null && trade.exitPrice > 0 ? (
                               <span className="text-[#e2e8f0]">{fmt(trade.exitPrice)}</span>
                             ) : (
                               <span className="text-[#4b5563]">—</span>
