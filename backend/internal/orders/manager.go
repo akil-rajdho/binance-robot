@@ -144,7 +144,7 @@ func (m *Manager) IsOrderFilled2(_ context.Context, orderID int64) (filled bool,
 	return found, nil
 }
 
-// GetOpenPositions returns all open short positions for the market.
+// GetOpenPositions returns all open positions for the market.
 func (m *Manager) GetOpenPositions(_ context.Context) ([]algorithm.OpenPosition, error) {
 	positions, err := m.client.GetPositions()
 	if err != nil {
@@ -153,10 +153,15 @@ func (m *Manager) GetOpenPositions(_ context.Context) ([]algorithm.OpenPosition,
 	var result []algorithm.OpenPosition
 	for _, p := range positions {
 		if !strings.EqualFold(p.Market, m.market) {
+			fmt.Printf("[Orders] GetOpenPositions: skipping position market=%s (want %s)\n", p.Market, m.market)
 			continue
 		}
 		amount, _ := strconv.ParseFloat(p.Amount, 64)
 		basePrice, _ := strconv.ParseFloat(p.BasePrice, 64)
+		// Handle negative amounts (some exchanges use negative for short positions)
+		if amount < 0 {
+			amount = -amount
+		}
 		if amount == 0 {
 			continue
 		}

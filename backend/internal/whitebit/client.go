@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -220,6 +221,10 @@ func (c *Client) GetPositions() ([]Position, error) {
 	var result []Position
 	if err := c.doRequest(context.Background(), endpoint, body, &result); err != nil {
 		return nil, err
+	}
+	log.Printf("[WhiteBit] GetPositions: found %d positions", len(result))
+	for i, p := range result {
+		log.Printf("[WhiteBit]   position[%d]: market=%s side=%s amount=%s basePrice=%s", i, p.Market, p.Side, p.Amount, p.BasePrice)
 	}
 	return result, nil
 }

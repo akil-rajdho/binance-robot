@@ -416,6 +416,37 @@ func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
 	sm.notifyStateChange(algoState)
 }
 
+// safeCancelOrder attempts to cancel an order. If the order was already filled,
+// it triggers the fill-detection flow instead. Returns true if the order was
+// successfully cancelled, false if it was filled or cancel status is unknown.
+// Must NOT be called with sm.mu held.
+func (sm *StateMachine) safeCancelOrder(orderID int64, label string) bool {
+	cancelErr := sm.orderMgr.CancelOrder(sm.ctx, orderID)
+	if cancelErr == nil {
+		return true // successfully cancelled
+	}
+	log.Printf("[StateMachine] %s: CancelOrder(%d) failed: %v — checking if filled", label, orderID, cancelErr)
+
+	// Cancel failed — check if the order was filled
+	filled, _, fillPrice, fillErr := sm.orderMgr.IsOrderFilled(sm.ctx, orderID)
+	if fillErr != nil {
+		log.Printf("[StateMachine] %s: IsOrderFilled(%d) error: %v — treating as cancelled", label, orderID, fillErr)
+		return true // assume cancelled to avoid stuck state
+	}
+
+	if filled {
+		log.Printf("[StateMachine] %s: Order %d was FILLED at %.2f — triggering fill flow", label, orderID, fillPrice)
+		// Trigger the fill detection flow via checkOrderFilled
+		// checkOrderFilled will handle transitioning to POSITION_OPEN
+		sm.checkOrderFilled(sm.ctx)
+		return false // order was filled, not cancelled
+	}
+
+	// Not filled, not cancelled successfully — order may still be active or in unknown state
+	log.Printf("[StateMachine] %s: Order %d cancel failed but not filled — treating as cancelled", label, orderID)
+	return true
+}
+
 func (sm *StateMachine) checkPositionClosed(ctx context.Context) {
 	sm.mu.Lock()
 	if sm.state != StatePositionOpen {
@@ -660,8 +691,17 @@ func (sm *StateMachine) OnPrice(price float64) {
 					}
 					cancelledTradeID := sm.activeTradeID
 					cancelledAtPrice := sm.currentPrice
-					if cancelErr := sm.orderMgr.CancelOrder(sm.ctx, sm.activeOrderID); cancelErr != nil {
-						log.Printf("[StateMachine] Cancel timer (adopted): CancelOrder(%d) error: %v", sm.activeOrderID, cancelErr)
+					orderID := sm.activeOrderID
+					sm.mu.Unlock()
+
+					if !sm.safeCancelOrder(orderID, "Cancel timer (adopted)") {
+						return // order was filled, checkOrderFilled handled the transition
+					}
+
+					sm.mu.Lock()
+					if sm.state != StateOrderPlaced {
+						sm.mu.Unlock()
+						return
 					}
 					if sm.entryOffset > sm.entryOffsetMin {
 						sm.entryOffset -= sm.entryOffsetStep
@@ -808,9 +848,18 @@ func (sm *StateMachine) OnPrice(price float64) {
 			}
 			cancelledTradeID := sm.activeTradeID
 			cancelledAtPrice := sm.currentPrice
-			cancelErr := sm.orderMgr.CancelOrder(sm.ctx, sm.activeOrderID)
-			if cancelErr != nil {
-				log.Printf("[StateMachine] Cancel timer: CancelOrder(%d) error: %v", sm.activeOrderID, cancelErr)
+			orderID := sm.activeOrderID
+			sm.mu.Unlock()
+
+			if !sm.safeCancelOrder(orderID, "Cancel timer") {
+				return // order was filled, checkOrderFilled handled the transition
+			}
+
+			sm.mu.Lock()
+			// Re-check state — checkOrderFilled might have transitioned us
+			if sm.state != StateOrderPlaced {
+				sm.mu.Unlock()
+				return
 			}
 			if sm.entryOffset > sm.entryOffsetMin {
 				sm.entryOffset -= sm.entryOffsetStep
@@ -825,7 +874,6 @@ func (sm *StateMachine) OnPrice(price float64) {
 			sm.state = StateIdle
 			algoState := sm.buildAlgoState()
 			sm.mu.Unlock()
-			// Update DB outside the mutex so the record is marked CANCELLED immediately.
 			if dbErr := sm.db.UpdateTrade(cancelledTradeID, 0, 0, "CANCELLED"); dbErr != nil {
 				log.Printf("[StateMachine] Cancel timer: UpdateTrade(CANCELLED) error: %v", dbErr)
 			}
@@ -1054,8 +1102,17 @@ func (sm *StateMachine) SyncOnEnable() {
 		}
 		cancelledTradeID := sm.activeTradeID
 		cancelledAtPrice := sm.currentPrice
-		if cancelErr := sm.orderMgr.CancelOrder(sm.ctx, sm.activeOrderID); cancelErr != nil {
-			log.Printf("[StateMachine] SyncOnEnable cancel timer: CancelOrder(%d) error: %v", sm.activeOrderID, cancelErr)
+		orderID := sm.activeOrderID
+		sm.mu.Unlock()
+
+		if !sm.safeCancelOrder(orderID, "SyncOnEnable cancel timer") {
+			return // order was filled, checkOrderFilled handled the transition
+		}
+
+		sm.mu.Lock()
+		if sm.state != StateOrderPlaced {
+			sm.mu.Unlock()
+			return
 		}
 		if sm.entryOffset > sm.entryOffsetMin {
 			sm.entryOffset -= sm.entryOffsetStep
@@ -1713,13 +1770,23 @@ func (sm *StateMachine) RecoverOpenTrades(ctx context.Context) error {
 		// Start a fresh 10-minute cancel timer.
 		sm.cancelTimer = time.AfterFunc(time.Duration(sm.orderCancelMinutes)*time.Minute, func() {
 			sm.mu.Lock()
-			defer sm.mu.Unlock()
-
 			if sm.state != StateOrderPlaced {
+				sm.mu.Unlock()
 				return
 			}
-			if cancelErr := sm.orderMgr.CancelOrder(sm.ctx, sm.activeOrderID); cancelErr != nil {
-				log.Printf("[Recovery] Cancel timer: CancelOrder(%d) error: %v", sm.activeOrderID, cancelErr)
+			cancelledTradeID := sm.activeTradeID
+			cancelledAtPrice := sm.currentPrice
+			orderID := sm.activeOrderID
+			sm.mu.Unlock()
+
+			if !sm.safeCancelOrder(orderID, "Recovery cancel timer") {
+				return // order was filled, checkOrderFilled handled the transition
+			}
+
+			sm.mu.Lock()
+			if sm.state != StateOrderPlaced {
+				sm.mu.Unlock()
+				return
 			}
 			sm.activeOrderID = 0
 			sm.activeOrderPrice = 0
@@ -1729,9 +1796,16 @@ func (sm *StateMachine) RecoverOpenTrades(ctx context.Context) error {
 			if sm.entryOffset > sm.entryOffsetMin {
 				sm.entryOffset -= sm.entryOffsetStep
 			}
+			sm.lastCancelAt = time.Now()
 			sm.state = StateIdle
-
 			algoState := sm.buildAlgoState()
+			sm.mu.Unlock()
+			if dbErr := sm.db.UpdateTrade(cancelledTradeID, 0, 0, "CANCELLED"); dbErr != nil {
+				log.Printf("[Recovery] Cancel timer: UpdateTrade(CANCELLED) error: %v", dbErr)
+			}
+			if dbErr := sm.db.UpdateCancelPrice(cancelledTradeID, cancelledAtPrice); dbErr != nil {
+				log.Printf("[Recovery] UpdateCancelPrice error for trade %d: %v", cancelledTradeID, dbErr)
+			}
 			go sm.notifyStateChange(algoState)
 			log.Printf("[Recovery] Cancel timer fired for recovered order → IDLE, entryOffset now %.0f", sm.entryOffset)
 		})
