@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -115,6 +116,11 @@ func (c *Client) doRequest(ctx context.Context, endpoint string, body map[string
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("whitebit: read response body: %w", err)
+	}
+
+	// Debug: log raw response for positions endpoint
+	if strings.Contains(endpoint, "positions") {
+		log.Printf("[WhiteBit] DEBUG %s response (%d bytes): %s", endpoint, len(respBody), string(respBody))
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
