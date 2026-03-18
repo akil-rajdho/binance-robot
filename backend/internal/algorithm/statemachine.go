@@ -991,12 +991,24 @@ func (sm *StateMachine) SyncOnEnable() {
 			return
 		}
 
-		log.Printf("[StateMachine] SyncOnEnable: found untracked short position: %.3f BTC @ $%.2f", shortPos.Amount, shortPos.BasePrice)
+		log.Printf("[StateMachine] SyncOnEnable: found untracked short position: %.3f BTC @ $%.2f (current price: $%.2f)", shortPos.Amount, shortPos.BasePrice, price)
 
 		// Adopt the position: create a DB trade entry and transition to POSITION_OPEN
 		entryPrice := shortPos.BasePrice
-		tpPrice := roundPrice(entryPrice - tpDist)
-		slPrice := roundPrice(entryPrice + slDist)
+
+		// For adopted positions, TP/SL must account for current price.
+		// A standard TP at entry-70 would be above market if the position is already in profit,
+		// causing the TP buy-limit to fill immediately and close the position.
+		// Instead: place TP below current price, SL above entry.
+		tpPrice := roundPrice(price - tpDist)       // TP below current market price
+		slPrice := roundPrice(entryPrice + slDist)   // SL above entry (standard)
+
+		// Safety: if TP would be >= current price (position is losing), use entry-based TP
+		if tpPrice >= price {
+			tpPrice = roundPrice(entryPrice - tpDist)
+		}
+
+		log.Printf("[StateMachine] SyncOnEnable: adopting with TP=$%.1f SL=$%.1f (entry=$%.2f, current=$%.2f)", tpPrice, slPrice, entryPrice, price)
 
 		snapshot := ReasoningSnapshot{
 			Timestamp:        time.Now(),
