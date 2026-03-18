@@ -222,7 +222,7 @@ func (c *Client) GetActiveConditionalOrders(market string) ([]OrderResult, error
 
 // GetPositions returns all open collateral positions.
 func (c *Client) GetPositions() ([]Position, error) {
-	const endpoint = "/api/v4/collateral-account/positions"
+	const endpoint = "/api/v4/collateral-account/positions/open"
 	body := map[string]interface{}{}
 	var result []Position
 	if err := c.doRequest(context.Background(), endpoint, body, &result); err != nil {

@@ -161,16 +161,20 @@ func (m *Manager) GetOpenPositions(_ context.Context) ([]algorithm.OpenPosition,
 		}
 		amount, _ := strconv.ParseFloat(p.Amount, 64)
 		basePrice, _ := strconv.ParseFloat(p.BasePrice, 64)
-		// Handle negative amounts (some exchanges use negative for short positions)
-		if amount < 0 {
-			amount = -amount
-		}
 		if amount == 0 {
 			continue
 		}
+		// WhiteBit doesn't return a "side" field — determine from amount sign
+		// Negative amount = short, positive = long
+		side := "long"
+		if amount < 0 {
+			side = "short"
+			amount = -amount
+		}
+		fmt.Printf("[Orders] GetOpenPositions: found position market=%s side=%s amount=%.4f basePrice=%.2f\n", p.Market, side, amount, basePrice)
 		result = append(result, algorithm.OpenPosition{
 			Market:    p.Market,
-			Side:      strings.ToLower(p.Side),
+			Side:      side,
 			Amount:    amount,
 			BasePrice: basePrice,
 		})
