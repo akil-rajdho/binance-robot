@@ -66,7 +66,7 @@ func (d *deployer) snapshot() ([]string, bool) {
 // Deploy execution
 // ---------------------------------------------------------------------------
 
-const deployScript = "/root/binance-robot/deploy.sh"
+const deployScript = "/project/autodeploy.sh"
 
 func (d *deployer) run() {
 	d.mu.Lock()
@@ -89,7 +89,7 @@ func (d *deployer) run() {
 		d.broadcast(fmt.Sprintf("=== Deploy started at %s ===", time.Now().Format("2006-01-02 15:04:05")))
 
 		cmd := exec.Command("/bin/bash", deployScript)
-		cmd.Dir = "/root/binance-robot"
+		cmd.Dir = "/project"
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
