@@ -17,5 +17,7 @@ docker compose -p binance-robot up -d --no-deps --force-recreate frontend postgr
 echo "--- Container status:"
 docker compose -p binance-robot ps
 
-echo "--- Restarting backend (stream will end here)..."
-docker compose -p binance-robot up -d --no-deps --force-recreate backend
+echo "--- Scheduling backend restart in 3 seconds..."
+nohup sh -c 'sleep 3 && cd /project && docker compose -p binance-robot up -d --no-deps --force-recreate backend' >/dev/null 2>&1 &
+
+echo "=== Deploy complete (backend will restart momentarily) ==="
