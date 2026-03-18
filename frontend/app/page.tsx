@@ -70,6 +70,18 @@ export default function Home() {
 
   const conditionMet = algoState?.conditionMet ?? false;
 
+  // Compute avg/max daily price from candles
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayStartUnix = Math.floor(todayStart.getTime() / 1000);
+  const todayCandles = candles.filter((c) => c.time >= todayStartUnix);
+  const avgDailyPrice = todayCandles.length > 0
+    ? todayCandles.reduce((sum, c) => sum + c.close, 0) / todayCandles.length
+    : 0;
+  const maxDailyPrice = todayCandles.length > 0
+    ? Math.max(...todayCandles.map((c) => c.high))
+    : 0;
+
   return (
     <div className="min-h-screen bg-[#070B14]">
       {/* Header */}
@@ -140,8 +152,8 @@ export default function Home() {
           <div className="md:col-span-2">
             <PriceTicker
               currentPrice={currentPrice}
-              avgDailyPrice={0}
-              maxDailyPrice={0}
+              avgDailyPrice={avgDailyPrice}
+              maxDailyPrice={maxDailyPrice}
               conditionMet={conditionMet}
               botEnabled={botEnabled}
               connected={connected}

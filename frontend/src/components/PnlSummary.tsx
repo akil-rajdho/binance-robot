@@ -45,7 +45,7 @@ export default function PnlSummary({ todayPnl, totalPnl, winRate, tradeCount }: 
   const winRatePct = (winRate * 100).toFixed(0);
 
   return (
-    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-2 md:p-4 flex flex-col gap-3">
+    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-2 md:p-4 flex flex-col gap-3 h-full">
       <h2 className="text-sm font-semibold text-[#e2e8f0]">P&amp;L Summary</h2>
       <div className="grid grid-cols-2 gap-2">
         <StatCard

@@ -46,7 +46,7 @@ export default function PriceTicker({
       : 'text-[#4b5563]';
 
   return (
-    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-2 md:p-4 flex flex-col gap-3">
+    <div className="rounded-lg border border-[#1E2A3D] bg-[#111827] p-2 md:p-4 flex flex-col gap-3 h-full">
       {/* Top row: label + connection status */}
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-[#94a3b8] uppercase tracking-wide">BTC/USDT</span>
