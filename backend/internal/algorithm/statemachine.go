@@ -1027,7 +1027,10 @@ func (sm *StateMachine) SyncOnEnable() {
 		}
 
 		if tpErr != nil || slErr != nil {
-			log.Printf("[StateMachine] SyncOnEnable: failed to place TP/SL for adopted position — cannot track safely")
+			log.Printf("[StateMachine] SyncOnEnable: failed to place TP/SL for adopted position — marking trade as CANCELLED")
+			if dbErr := sm.db.UpdateTrade(tradeID, 0, 0, "CANCELLED"); dbErr != nil {
+				log.Printf("[StateMachine] SyncOnEnable: UpdateTrade(CANCELLED) error: %v", dbErr)
+			}
 			return
 		}
 
