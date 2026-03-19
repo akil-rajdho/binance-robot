@@ -395,53 +395,59 @@ export default function ConditionsTable({ algoState, token, onActivity }: Props)
         </div>
       </div>
 
-      {/* ── Conditions Table ── */}
+      {/* ── Conditions Table or Active Order/Position ── */}
       <div className="px-4 py-3">
         {!algoState ? (
           <p className="text-sm text-[#4b5563]">Connecting...</p>
         ) : !isIdle ? (
-          /* Non-IDLE state info */
+          /* Non-IDLE: hide conditions, show order/position details */
           <div className="space-y-2">
             {stateKey === 'ORDER_PLACED' && (
-              <div className="bg-[#0d1421] rounded-lg border border-[#1E2A3D] p-3 space-y-1.5">
-                <p className="text-sm text-yellow-400 font-medium">
-                  Limit order placed @ {fmtPrice(algoState.activeOrderPrice)}
-                </p>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                  <span className="text-[#64748b]">Current Price</span>
-                  <span className="font-mono text-white text-right">{fmtPrice(algoState.currentPrice)}</span>
-                  <span className="text-[#64748b]">TP Target</span>
-                  <span className="font-mono text-green-400 text-right">{fmtPrice(algoState.tpPrice)}</span>
-                  <span className="text-[#64748b]">SL Target</span>
-                  <span className="font-mono text-red-400 text-right">{fmtPrice(algoState.slPrice)}</span>
-                  {algoState.cancelAt && (
-                    <>
-                      <span className="text-[#64748b]">Cancels in</span>
-                      <span className="font-mono text-orange-400 text-right">{formatCountdown(algoState.cancelAt)}</span>
-                    </>
-                  )}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-[#0d1421] rounded-lg border border-[#1E2A3D] p-3">
+                  <p className="text-xs text-[#64748b] mb-1">Order Price</p>
+                  <p className="font-mono text-sm font-semibold text-white">{fmtPrice(algoState.activeOrderPrice)}</p>
+                </div>
+                <div className="bg-[#0d1421] rounded-lg border border-[#1E2A3D] p-3">
+                  <p className="text-xs text-[#64748b] mb-1">Take Profit</p>
+                  <p className="font-mono text-sm font-semibold text-green-400">{fmtPrice(algoState.tpPrice)}</p>
+                </div>
+                <div className="bg-[#0d1421] rounded-lg border border-[#1E2A3D] p-3">
+                  <p className="text-xs text-[#64748b] mb-1">Stop Loss</p>
+                  <p className="font-mono text-sm font-semibold text-red-400">{fmtPrice(algoState.slPrice)}</p>
+                </div>
+                <div className="bg-[#0d1421] rounded-lg border border-[#1E2A3D] p-3">
+                  <p className="text-xs text-[#64748b] mb-1">Cancels in</p>
+                  <p className="font-mono text-sm font-semibold text-orange-400">
+                    {algoState.cancelAt ? formatCountdown(algoState.cancelAt) : '—'}
+                  </p>
                 </div>
               </div>
             )}
             {stateKey === 'POSITION_OPEN' && (
-              <div className="bg-[#0d1421] rounded-lg border border-[#1E2A3D] p-3 space-y-1.5">
-                <p className="text-sm text-green-400 font-medium">
-                  Position open @ {fmtPrice(algoState.activeOrderPrice)}
-                </p>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                  <span className="text-[#64748b]">Current Price</span>
-                  <span className="font-mono text-white text-right">{fmtPrice(algoState.currentPrice)}</span>
-                  <span className="text-[#64748b]">TP Target</span>
-                  <span className="font-mono text-green-400 text-right">{fmtPrice(algoState.tpPrice)}</span>
-                  <span className="text-[#64748b]">SL Target</span>
-                  <span className="font-mono text-red-400 text-right">{fmtPrice(algoState.slPrice)}</span>
-                  {algoState.positionSizeUsdt != null && (
-                    <>
-                      <span className="text-[#64748b]">Size</span>
-                      <span className="font-mono text-white text-right">${fmt(algoState.positionSizeUsdt)} @ {algoState.leverage ?? '?'}x</span>
-                    </>
-                  )}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div className="bg-[#0d1421] rounded-lg border border-[#1E2A3D] p-3">
+                  <p className="text-xs text-[#64748b] mb-1">Entry Price</p>
+                  <p className="font-mono text-sm font-semibold text-white">{fmtPrice(algoState.activeOrderPrice)}</p>
                 </div>
+                <div className="bg-[#0d1421] rounded-lg border border-[#1E2A3D] p-3">
+                  <p className="text-xs text-[#64748b] mb-1">Current Price</p>
+                  <p className="font-mono text-sm font-semibold text-white">{fmtPrice(algoState.currentPrice)}</p>
+                </div>
+                <div className="bg-[#0d1421] rounded-lg border border-[#1E2A3D] p-3">
+                  <p className="text-xs text-[#64748b] mb-1">Take Profit</p>
+                  <p className="font-mono text-sm font-semibold text-green-400">{fmtPrice(algoState.tpPrice)}</p>
+                </div>
+                <div className="bg-[#0d1421] rounded-lg border border-[#1E2A3D] p-3">
+                  <p className="text-xs text-[#64748b] mb-1">Stop Loss</p>
+                  <p className="font-mono text-sm font-semibold text-red-400">{fmtPrice(algoState.slPrice)}</p>
+                </div>
+                {algoState.positionSizeUsdt != null && (
+                  <div className="bg-[#0d1421] rounded-lg border border-[#1E2A3D] p-3">
+                    <p className="text-xs text-[#64748b] mb-1">Size</p>
+                    <p className="font-mono text-sm font-semibold text-white">${fmt(algoState.positionSizeUsdt)} @ {algoState.leverage ?? '?'}x</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
