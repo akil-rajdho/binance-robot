@@ -142,7 +142,15 @@ func (m *Manager) IsOrderFilled2(_ context.Context, orderID int64) (filled bool,
 	if execErr != nil {
 		return false, fmt.Errorf("orders: IsOrderFilled2 GetExecutedOrder: %w", execErr)
 	}
-	return found, nil
+	if found {
+		return true, nil
+	}
+
+	// Order not in active orders AND not in execution history.
+	// This means the order was cancelled/expired/removed externally.
+	// Treat as filled so the position close flow can proceed.
+	fmt.Printf("[Orders] IsOrderFilled2: order %d not found anywhere — treating as filled\n", orderID)
+	return true, nil
 }
 
 // GetOpenPositions returns all open positions for the market.
