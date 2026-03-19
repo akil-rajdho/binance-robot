@@ -901,7 +901,9 @@ func (sm *StateMachine) OnPrice(price float64) {
 
 		orderID, err := sm.orderMgr.PlaceShortLimitOrder(sm.ctx, orderPrice, amount)
 		if err != nil {
-			log.Printf("[StateMachine] PlaceShortLimitOrder error: %v", err)
+			log.Printf("[StateMachine] PlaceShortLimitOrder error: %v — cooling down 60s", err)
+			// Set a cooldown to prevent spamming on every tick (e.g., insufficient balance)
+			sm.lastCancelAt = time.Now()
 			return
 		}
 
