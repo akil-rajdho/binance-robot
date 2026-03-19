@@ -561,9 +561,18 @@ func (sm *StateMachine) forceClosePosition(ctx context.Context) {
 	sm.mu.Lock()
 	tpOrderID := sm.tpOrderID
 	currentPrice := sm.currentPrice
+	entryPrice := sm.activeOrderPrice
+	posSize := sm.positionSizeUSDT
+	leverage := sm.leverage
 	sm.mu.Unlock()
 
 	tightTP := currentPrice + 15.0
+
+	// Compute the position amount for the order
+	amount := "0"
+	if entryPrice > 0 {
+		amount = fmt.Sprintf("%.3f", posSize/entryPrice*float64(leverage))
+	}
 
 	log.Printf("[StateMachine] Position profitable >1min at $%.2f — tightening TP #%d → $%.2f",
 		currentPrice, tpOrderID, tightTP)
@@ -577,7 +586,8 @@ func (sm *StateMachine) forceClosePosition(ctx context.Context) {
 
 	// Place a new tight limit BUY at currentPrice + $15 to lock in profit
 	tightTP = roundPrice(tightTP)
-	newTPOrderID, err := sm.orderMgr.PlaceTakeProfit(ctx, 0, tightTP, "0")
+	log.Printf("[StateMachine] Placing tight TP: price=$%.1f amount=%s", tightTP, amount)
+	newTPOrderID, err := sm.orderMgr.PlaceTakeProfit(ctx, 0, tightTP, amount)
 	if err != nil {
 		log.Printf("[StateMachine] ERROR: failed to place tight TP at $%.2f: %v", tightTP, err)
 		return
