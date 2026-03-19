@@ -302,14 +302,133 @@ func (sm *StateMachine) Start(ctx context.Context) {
 func (sm *StateMachine) pollOrderStatus(ctx context.Context) {
 	sm.mu.Lock()
 	state := sm.state
+	botEnabled := sm.botEnabled
 	sm.mu.Unlock()
 
 	switch state {
+	case StateIdle:
+		// Check for untracked positions on WhiteBit (e.g., filled while bot was restarting)
+		if botEnabled {
+			sm.checkForUntrackedPositions(ctx)
+		}
 	case StateOrderPlaced:
 		sm.checkOrderFilled(ctx)
 	case StatePositionOpen:
 		sm.checkPositionClosed(ctx)
 	}
+}
+
+// checkForUntrackedPositions detects open positions on WhiteBit that the bot isn't tracking.
+// Called during IDLE polls. If a short position exists, adopts it with TP/SL.
+func (sm *StateMachine) checkForUntrackedPositions(ctx context.Context) {
+	positions, err := sm.orderMgr.GetOpenPositions(ctx)
+	if err != nil {
+		return // non-fatal, will retry next poll
+	}
+
+	var shortPos *OpenPosition
+	for i, p := range positions {
+		if p.Side == "short" {
+			shortPos = &positions[i]
+			break
+		}
+		if p.Side == "long" {
+			log.Printf("[StateMachine] WARNING: unmanaged LONG position found: %.3f BTC @ $%.2f", p.Amount, p.BasePrice)
+		}
+	}
+
+	if shortPos == nil {
+		return
+	}
+
+	sm.mu.Lock()
+	if sm.state != StateIdle || !sm.botEnabled {
+		sm.mu.Unlock()
+		return
+	}
+	price := sm.currentPrice
+	tpDist := sm.tpDistance
+	slDist := sm.slDistance
+	posSize := sm.positionSizeUSDT
+	leverage := sm.leverage
+	sm.mu.Unlock()
+
+	if price <= 0 {
+		return // no price data yet
+	}
+
+	// Check DB for existing OPEN trades to avoid duplicates
+	existingTrades, _ := sm.db.GetOpenTrades()
+	if len(existingTrades) > 0 {
+		// Already have a tracked trade — try recovery instead
+		if err := sm.RecoverOpenTrades(ctx); err != nil {
+			log.Printf("[StateMachine] checkForUntrackedPositions: recovery error: %v", err)
+		}
+		return
+	}
+
+	log.Printf("[StateMachine] Detected untracked short position: %.3f BTC @ $%.2f — adopting", shortPos.Amount, shortPos.BasePrice)
+
+	entryPrice := shortPos.BasePrice
+	tpPrice := roundPrice(price - tpDist)
+	slPrice := roundPrice(entryPrice + slDist)
+	posAmount := fmt.Sprintf("%.3f", shortPos.Amount)
+
+	snapshot := ReasoningSnapshot{
+		Timestamp:        time.Now(),
+		CurrentPrice:     price,
+		High10min:        0,
+		Difference:       0,
+		ConditionMet:     true,
+		OrderPrice:       entryPrice,
+		TPPrice:          tpPrice,
+		SLPrice:          slPrice,
+		PositionSizeUSDT: posSize,
+		Leverage:         leverage,
+	}
+	tradeID, dbErr := sm.db.SaveReasoningSnapshot(snapshot, 0)
+	if dbErr != nil {
+		log.Printf("[StateMachine] checkForUntrackedPositions: SaveReasoningSnapshot error: %v", dbErr)
+		return
+	}
+
+	tpOrderID, tpErr := sm.orderMgr.PlaceTakeProfit(ctx, 0, tpPrice, posAmount)
+	if tpErr != nil {
+		log.Printf("[StateMachine] checkForUntrackedPositions: PlaceTakeProfit error: %v", tpErr)
+		sm.db.UpdateTrade(tradeID, 0, 0, "CANCELLED")
+		return
+	}
+	slOrderID, slErr := sm.orderMgr.PlaceStopLoss(ctx, 0, slPrice, posAmount)
+	if slErr != nil {
+		log.Printf("[StateMachine] checkForUntrackedPositions: PlaceStopLoss error: %v", slErr)
+		// Cancel the TP we just placed
+		sm.orderMgr.CancelOrder(ctx, tpOrderID)
+		sm.db.UpdateTrade(tradeID, 0, 0, "CANCELLED")
+		return
+	}
+
+	sm.db.UpdateOrderIDs(tradeID, tpOrderID, slOrderID)
+	sm.db.UpdateEntryPrice(tradeID, entryPrice)
+
+	sm.mu.Lock()
+	if sm.state != StateIdle {
+		sm.mu.Unlock()
+		return
+	}
+	sm.state = StatePositionOpen
+	sm.activeOrderID = 0
+	sm.activeOrderPrice = entryPrice
+	sm.activeTradeID = tradeID
+	sm.tpOrderID = tpOrderID
+	sm.slOrderID = slOrderID
+	sm.tpPrice = tpPrice
+	sm.slPrice = slPrice
+	sm.positionAmount = posAmount
+	algoState := sm.buildAlgoState()
+	sm.mu.Unlock()
+
+	log.Printf("[StateMachine] Adopted position @ $%.2f → POSITION_OPEN (TP=$%.1f, SL=$%.1f)", entryPrice, tpPrice, slPrice)
+	sm.notifyStateChange(algoState)
 }
 
 func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
