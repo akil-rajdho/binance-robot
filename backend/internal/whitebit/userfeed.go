@@ -147,29 +147,49 @@ func (f *UserFeed) run(ctx context.Context) error {
 
 	log.Printf("[UserFeed] subscribed to order streams for %s", f.market)
 
-	// Read loop
+	// Ping ticker to keep the connection alive
+	pingTicker := time.NewTicker(30 * time.Second)
+	defer pingTicker.Stop()
+
+	// Read messages in a goroutine
+	msgCh := make(chan []byte, 64)
+	errCh := make(chan error, 1)
+	go func() {
+		for {
+			_, raw, err := conn.ReadMessage()
+			if err != nil {
+				errCh <- err
+				return
+			}
+			msgCh <- raw
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		default:
-		}
-
-		_, raw, err := conn.ReadMessage()
-		if err != nil {
+		case err := <-errCh:
 			return fmt.Errorf("read: %w", err)
-		}
-
-		var msg wsMessage
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			continue
-		}
-
-		switch msg.Method {
-		case "ordersPending_update":
-			f.handlePendingUpdate(msg.Params)
-		case "ordersExecuted_update":
-			f.handleExecutedUpdate(msg.Params)
+		case raw := <-msgCh:
+			var msg wsMessage
+			if err := json.Unmarshal(raw, &msg); err != nil {
+				continue
+			}
+			switch msg.Method {
+			case "ordersPending_update":
+				f.handlePendingUpdate(msg.Params)
+			case "ordersExecuted_update":
+				f.handleExecutedUpdate(msg.Params)
+			}
+		case <-pingTicker.C:
+			if err := conn.WriteJSON(map[string]interface{}{
+				"id":     0,
+				"method": "ping",
+				"params": []interface{}{},
+			}); err != nil {
+				return fmt.Errorf("ping: %w", err)
+			}
 		}
 	}
 }
