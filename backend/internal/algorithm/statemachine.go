@@ -993,28 +993,35 @@ func (sm *StateMachine) SyncOnEnable() {
 
 		log.Printf("[StateMachine] SyncOnEnable: found untracked short position: %.3f BTC @ $%.2f (current price: $%.2f)", shortPos.Amount, shortPos.BasePrice, price)
 
+		// Wait for a valid market price before adopting (price feed may not be connected yet)
+		if price <= 0 {
+			log.Println("[StateMachine] SyncOnEnable: waiting for price feed before adopting position...")
+			for i := 0; i < 30; i++ { // wait up to 30 seconds
+				time.Sleep(time.Second)
+				sm.mu.Lock()
+				price = sm.currentPrice
+				sm.mu.Unlock()
+				if price > 0 {
+					break
+				}
+			}
+			if price <= 0 {
+				log.Println("[StateMachine] SyncOnEnable: no price data after 30s — cannot adopt position safely")
+				return
+			}
+			log.Printf("[StateMachine] SyncOnEnable: price feed connected, current price: $%.2f", price)
+		}
+
 		// Adopt the position: create a DB trade entry and transition to POSITION_OPEN
 		entryPrice := shortPos.BasePrice
 
-		// For adopted positions, TP/SL must account for current price.
-		// A standard TP at entry-70 would be above market if the position is already in profit,
-		// causing the TP buy-limit to fill immediately and close the position.
-		// If we don't have a current price yet (startup before price feed), use entry price.
-		refPrice := price
-		if refPrice <= 0 {
-			refPrice = entryPrice
-		}
-
-		tpPrice := roundPrice(refPrice - tpDist)     // TP below reference price
-		slPrice := roundPrice(entryPrice + slDist)    // SL above entry (standard)
-
-		// Safety: ensure TP is below current market (if we have market data)
-		if price > 0 && tpPrice >= price {
-			tpPrice = roundPrice(price - tpDist)
-		}
+		// TP must be below current market price to avoid immediate fill.
+		// For a short in profit: TP below current price, SL above entry.
+		tpPrice := roundPrice(price - tpDist)
+		slPrice := roundPrice(entryPrice + slDist)
 
 		posAmount := fmt.Sprintf("%.3f", shortPos.Amount) // actual BTC amount, not "0"
-		log.Printf("[StateMachine] SyncOnEnable: adopting with TP=$%.1f SL=$%.1f amount=%s (entry=$%.2f, current=$%.2f)", tpPrice, slPrice, posAmount, entryPrice, refPrice)
+		log.Printf("[StateMachine] SyncOnEnable: adopting with TP=$%.1f SL=$%.1f amount=%s (entry=$%.2f, current=$%.2f)", tpPrice, slPrice, posAmount, entryPrice, price)
 
 		snapshot := ReasoningSnapshot{
 			Timestamp:        time.Now(),
