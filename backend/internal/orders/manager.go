@@ -134,11 +134,13 @@ func (m *Manager) IsOrderFilled2(_ context.Context, orderID int64) (filled bool,
 	// Check conditional active orders (covers SL which is a stop-limit)
 	conditionalOrders, err := m.client.GetActiveConditionalOrders(m.market)
 	if err != nil {
-		return false, fmt.Errorf("orders: IsOrderFilled2 GetActiveConditionalOrders: %w", err)
-	}
-	for _, o := range conditionalOrders {
-		if o.OrderID == orderID {
-			return false, nil // still active
+		// Non-fatal: API key may lack permission. Log and continue to execution history check.
+		fmt.Printf("[Orders] IsOrderFilled2: GetActiveConditionalOrders error (non-fatal): %v\n", err)
+	} else {
+		for _, o := range conditionalOrders {
+			if o.OrderID == orderID {
+				return false, nil // still active
+			}
 		}
 	}
 
