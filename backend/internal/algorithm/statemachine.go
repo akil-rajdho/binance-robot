@@ -188,6 +188,7 @@ type StateMachine struct {
 	// profit duration tracking
 	profitStartTime time.Time // when the position first became profitable
 	inProfit        bool      // whether the position is currently in profit
+	tpTightened     bool      // true after forceClosePosition tightened TP; prevents re-tightening
 
 	// config (read from DB)
 	positionSizeUSDT  float64
@@ -271,10 +272,12 @@ func (sm *StateMachine) OnCandle(high, low, close_ float64, ts time.Time) {
 	sm.mu.Unlock()
 }
 
-// Start begins the polling loop that checks order status every 5 seconds.
+// Start begins the polling loop that syncs order/position status with WhiteBit.
+// Poll interval is 15 s — fast enough to catch fills promptly while staying well
+// within WhiteBit API rate-limits (~10 req/s).
 func (sm *StateMachine) Start(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(5 * time.Second)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 
 		for {
@@ -403,6 +406,7 @@ func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
 	sm.activeTradeID = tradeID
 	sm.inProfit = false
 	sm.profitStartTime = time.Time{}
+	sm.tpTightened = false
 	// Reset entry offset on successful fill.
 	sm.entryOffset = sm.entryOffsetInitial
 	sm.state = StatePositionOpen
@@ -461,7 +465,8 @@ func (sm *StateMachine) checkPositionClosed(ctx context.Context) {
 	}
 
 	// Check if the position has been continuously profitable for more than 1 minute.
-	if sm.inProfit && !sm.profitStartTime.IsZero() && time.Since(sm.profitStartTime) > time.Minute {
+	// Skip if TP was already tightened — no need to tighten again.
+	if sm.inProfit && !sm.profitStartTime.IsZero() && !sm.tpTightened && time.Since(sm.profitStartTime) > time.Minute {
 		log.Printf("[StateMachine] Position has been profitable for >1 minute. Force-closing position.")
 		sm.mu.Unlock()
 		sm.forceClosePosition(ctx)
@@ -540,12 +545,28 @@ func (sm *StateMachine) checkPositionClosed(ctx context.Context) {
 	sm.slOrderID = 0
 	sm.tpPrice = 0
 	sm.slPrice = 0
+	sm.tpTightened = false
 	sm.entryOffset = sm.entryOffsetInitial // reset adaptive offset after successful trade close
 	algoState := sm.buildAlgoState()
 	sm.mu.Unlock()
 
 	log.Printf("[StateMachine] Position closed (%s) → IDLE", status)
 	sm.notifyStateChange(algoState)
+
+	// Verify position is actually closed and no residual orders/positions exist
+	go func() {
+		time.Sleep(2 * time.Second) // brief delay for exchange propagation
+		positions, err := sm.orderMgr.GetOpenPositions(context.Background())
+		if err != nil {
+			log.Printf("[StateMachine] Post-close position check error: %v", err)
+			return
+		}
+		for _, p := range positions {
+			if p.Side == "short" || p.Side == "long" {
+				log.Printf("[StateMachine] WARNING: residual %s position found after close: %.3f BTC @ $%.2f", p.Side, p.Amount, p.BasePrice)
+			}
+		}
+	}()
 
 	// Circuit breaker check
 	if pnlErr == nil {
@@ -598,7 +619,8 @@ func (sm *StateMachine) forceClosePosition(ctx context.Context) {
 	sm.mu.Lock()
 	sm.tpOrderID = newTPOrderID
 	sm.tpPrice = tightTP
-	// Reset profit timer so we don't keep tightening every 5s
+	// Mark TP as tightened so we never re-tighten; reset profit timer
+	sm.tpTightened = true
 	sm.inProfit = false
 	sm.profitStartTime = time.Time{}
 	algoState := sm.buildAlgoState()
@@ -953,6 +975,16 @@ func (sm *StateMachine) SyncOnEnable() {
 	cancelMins := sm.orderCancelMinutes
 	sm.mu.Unlock()
 
+	// Clean up any orphaned OPEN trades with no TP/SL (failed adoption attempts)
+	if openTrades, err := sm.db.GetOpenTrades(); err == nil {
+		for _, t := range openTrades {
+			if t.OrderID == 0 && t.TPOrderID == 0 && t.SLOrderID == 0 {
+				log.Printf("[StateMachine] SyncOnEnable: cleaning up orphaned trade #%d (no order IDs)", t.ID)
+				sm.db.UpdateTrade(t.ID, 0, 0, "CANCELLED")
+			}
+		}
+	}
+
 	// First: check DB for any open trades we might have missed.
 	if err := sm.RecoverOpenTrades(sm.ctx); err != nil {
 		log.Printf("[StateMachine] SyncOnEnable: RecoverOpenTrades error: %v", err)
@@ -1019,6 +1051,16 @@ func (sm *StateMachine) SyncOnEnable() {
 				return
 			}
 			log.Printf("[StateMachine] SyncOnEnable: price feed connected, current price: $%.2f", price)
+		}
+
+		// Check if we already have an OPEN trade for this position — avoid creating duplicates
+		existingTrades, _ := sm.db.GetOpenTrades()
+		if len(existingTrades) > 0 {
+			log.Printf("[StateMachine] SyncOnEnable: found existing OPEN trade #%d — skipping duplicate adoption, attempting recovery", existingTrades[0].ID)
+			if err := sm.RecoverOpenTrades(sm.ctx); err != nil {
+				log.Printf("[StateMachine] SyncOnEnable: recovery of existing trade failed: %v", err)
+			}
+			return
 		}
 
 		// Adopt the position: create a DB trade entry and transition to POSITION_OPEN
