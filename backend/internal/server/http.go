@@ -32,6 +32,7 @@ type DBStore interface {
 	GetAllSettings() (map[string]string, error)
 	SetSetting(key, value string) error
 	GetSetting(key string) (string, error)
+	DeleteAllTrades() error
 }
 
 // BotController is the subset of the algorithm state machine the server needs.
@@ -92,6 +93,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/bot/start", s.handleBotStart)
 	s.mux.HandleFunc("/api/bot/stop", s.handleBotStop)
 	s.mux.HandleFunc("/api/reasoning", s.handleReasoning)
+	s.mux.HandleFunc("/api/admin/reset", s.handleAdminReset)
 }
 
 // corsMiddleware injects CORS headers and handles OPTIONS preflight requests.
@@ -481,4 +483,27 @@ func (s *Server) handleReasoning(w http.ResponseWriter, r *http.Request) {
 		"state":     state.State,
 		"timestamp": time.Now(),
 	})
+}
+
+// POST /api/admin/reset — stops the bot, clears all trade history, and resets state.
+func (s *Server) handleAdminReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	log.Println("[Admin] Reset: stopping bot and clearing trade history")
+	s.sm.SetEnabled(false)
+
+	if err := s.db.DeleteAllTrades(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear trades: "+err.Error())
+		return
+	}
+
+	// Reset today_pnl so the daily loss tracker starts fresh.
+	if err := s.db.SetSetting("today_pnl", "0"); err != nil {
+		log.Printf("[Admin] Reset: failed to reset today_pnl: %v", err)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "message": "All trades cleared, bot stopped"})
 }

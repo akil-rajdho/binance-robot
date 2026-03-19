@@ -3,6 +3,7 @@ package orders
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -50,32 +51,47 @@ func (m *Manager) CancelOrder(_ context.Context, orderID int64) error {
 }
 
 // PlaceTakeProfit places a limit BUY order to close a short position at the given price.
-// amount "0" signals WhiteBit to close the entire position.
+// Always tries amount "0" first (close entire position) to avoid residual positions,
+// then falls back to the specific amount if "0" is rejected.
 func (m *Manager) PlaceTakeProfit(_ context.Context, _ int64, price float64, amount string) (orderID int64, err error) {
 	priceStr := fmt.Sprintf("%.1f", price)
-	if amount == "" {
-		amount = "0"
+	// Try "0" first (close entire position) — most reliable
+	result, err := m.client.PlaceCollateralLimitOrder(m.market, "buy", "0", priceStr, "")
+	if err == nil {
+		return result.OrderID, nil
 	}
-	result, err := m.client.PlaceCollateralLimitOrder(m.market, "buy", amount, priceStr, "")
-	if err != nil {
-		return 0, fmt.Errorf("orders: PlaceTakeProfit: %w", err)
+	// Fall back to specific amount if "0" was rejected
+	if amount != "" && amount != "0" {
+		log.Printf("[Orders] PlaceTakeProfit: amount '0' rejected, retrying with '%s'", amount)
+		result, err = m.client.PlaceCollateralLimitOrder(m.market, "buy", amount, priceStr, "")
+		if err == nil {
+			return result.OrderID, nil
+		}
 	}
-	return result.OrderID, nil
+	return 0, fmt.Errorf("orders: PlaceTakeProfit: %w", err)
 }
 
 // PlaceStopLoss places a stop-limit BUY order to close a short position when price rises to SL price.
 // Uses activation_price = SL price, limit price = SL price + 10 (slippage buffer).
+// Always tries amount "0" first (close entire position) to avoid residual positions,
+// then falls back to the specific amount if "0" is rejected.
 func (m *Manager) PlaceStopLoss(_ context.Context, _ int64, price float64, amount string) (orderID int64, err error) {
 	priceStr := fmt.Sprintf("%.1f", price)
 	limitStr := fmt.Sprintf("%.1f", price+10)
-	if amount == "" {
-		amount = "0"
+	// Try "0" first (close entire position) — most reliable
+	result, err := m.client.PlaceStopLimitOrder(m.market, "buy", "0", priceStr, limitStr)
+	if err == nil {
+		return result.OrderID, nil
 	}
-	result, err := m.client.PlaceStopLimitOrder(m.market, "buy", amount, priceStr, limitStr)
-	if err != nil {
-		return 0, fmt.Errorf("orders: PlaceStopLoss: %w", err)
+	// Fall back to specific amount if "0" was rejected
+	if amount != "" && amount != "0" {
+		log.Printf("[Orders] PlaceStopLoss: amount '0' rejected, retrying with '%s'", amount)
+		result, err = m.client.PlaceStopLimitOrder(m.market, "buy", amount, priceStr, limitStr)
+		if err == nil {
+			return result.OrderID, nil
+		}
 	}
-	return result.OrderID, nil
+	return 0, fmt.Errorf("orders: PlaceStopLoss: %w", err)
 }
 
 // IsOrderFilled checks if the entry order (regular collateral limit) has been filled.

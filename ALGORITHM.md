@@ -6,91 +6,89 @@ The bot trades BTC_PERP on WhiteBit exchange using a short-selling strategy. It 
 
 ## State Machine
 
-The bot operates as a 3-state machine:
-
 ```
 IDLE → ORDER_PLACED → POSITION_OPEN → IDLE
 ```
 
-### State: IDLE
-- Monitors BTC price via WebSocket feed
-- Evaluates 7 entry conditions (see Entry Conditions below)
-- When all conditions pass: places a short limit sell order → transitions to ORDER_PLACED
-
-### State: ORDER_PLACED
-- A limit sell order is active on WhiteBit
-- Polls every 5 seconds to check if the order was filled
-- Cancel timer: after `orderCancelMinutes` (default 10), cancels the order → back to IDLE
-- If filled: places TP and SL orders → transitions to POSITION_OPEN
-- If cancelled externally: marks as CANCELLED → back to IDLE
-
-### State: POSITION_OPEN
-- A short position is open with TP and SL orders on WhiteBit
-- Polls every 5 seconds to check if TP or SL was filled
-- **If TP fills**: cancel SL, record profit, back to IDLE
-- **If SL fills**: cancel TP, record loss, back to IDLE
-- **Profit tightening**: if position profitable >1 minute, tighten TP to currentPrice+$15
-
 ---
 
-## Section 1: Open Position Management
+## SECTION 1: Open Position Management
 
 ### 1.1 — TP/SL Placement & Tightening
 
 When a position is opened (either by the bot or adopted from WhiteBit):
 
-1. Place **Take Profit** — limit BUY order below current price
+1. Place **Take Profit** — limit BUY order at TP price
    - For bot-created: `entryPrice - tpDistance` (default $70)
    - For adopted positions in profit: `currentPrice - tpDistance`
+   - Amount: actual position size (e.g., "0.007"), NOT "0"
 2. Place **Stop Loss** — stop-limit BUY order above entry
-   - Price: `entryPrice + slDistance` (default $150)
+   - Activation price: `entryPrice + slDistance` (default $150)
    - Limit: SL price + $10 (slippage buffer)
-3. If position is profitable for >1 minute:
-   - Cancel existing TP
-   - Place tight TP at `currentPrice + $15`
-   - SL remains as safety net
+   - Amount: actual position size
+3. **TP Tightening**: if TP not filled within reasonable time (position profitable >1 min):
+   - Cancel existing TP on WhiteBit
+   - Place new TP closer to current price: `currentPrice + $15`
+   - Only tighten once per position (`tpTightened` flag)
+   - SL remains active as safety net
 
-### 1.2 — Order Lifecycle & Cancellation
+### 1.2 — Order Lifecycle & Linked References
 
-**Critical rule**: TP and SL are a pair. When one fills, the other MUST be cancelled.
+**Critical rule**: TP, SL, and position are linked. When one side fills, the other MUST be cancelled.
 
-The system maintains references:
-- `activeTradeID` — DB trade record ID
-- `activeOrderPrice` — entry price
-- `tpOrderID` — WhiteBit TP order ID
-- `slOrderID` — WhiteBit SL order ID
+The system maintains these linked references:
+
+| Field | Description |
+|-------|-------------|
+| `activeTradeID` | DB trade record ID |
+| `activeOrderPrice` | Entry price of the position |
+| `tpOrderID` | WhiteBit TP limit buy order ID |
+| `slOrderID` | WhiteBit SL stop-limit buy order ID |
+
+**Sync interval**: Every **15 seconds** via `pollOrderStatus` ticker.
 
 **On TP fill**:
-1. Cancel SL order on WhiteBit
+1. Cancel SL order on WhiteBit (conditional cancel)
 2. Record exit price and P&L in DB
-3. Verify no residual orders/positions remain
-4. Transition to IDLE
+3. Verify position is closed on WhiteBit (no residual short positions)
+4. Verify no residual long positions were created (TP buy can create a long if amount mismatches)
+5. Cancel any remaining open orders for the market
+6. Transition to IDLE
 
 **On SL fill**:
-1. Cancel TP order on WhiteBit
+1. Cancel TP order on WhiteBit (regular limit cancel)
 2. Record exit price and P&L in DB
-3. Verify no residual orders/positions remain
-4. Transition to IDLE
+3. Verify position is closed on WhiteBit (no residual short positions)
+4. Cancel any remaining open orders for the market
+5. Transition to IDLE
 
-**Sync interval**: Every 5 seconds via `pollOrderStatus` ticker.
+### 1.3 — Duplicate & Residual Prevention
 
-### 1.3 — Duplicate Prevention
+**Preventing duplicate orders**:
+- Never place TP/SL if order IDs already exist in state
+- Before adoption: check DB for existing OPEN trades first
+- `tpTightened` flag prevents placing tight TP more than once
 
-- Never place a new entry order if state is not IDLE
-- Never place TP/SL if they already exist (check order IDs)
-- After TP fill: verify position is closed on WhiteBit, cancel any residual orders
-- After SL fill: verify position is closed on WhiteBit, cancel any residual orders
-- On bot enable: check for existing positions/orders before placing new ones (SyncOnEnable)
+**Preventing residual positions/orders after close**:
+- After TP/SL fill, call `GetOpenPositions()` to verify no positions remain
+- If a LONG position is found after TP fill → log WARNING (user must close manually)
+- After close, call `GetActiveCollateralLimitOrders()` to cancel any leftover orders
+- Missing orders (not in active, not in execution history) → treat as filled, don't wait forever
+
+**On bot enable (SyncOnEnable)**:
+- Clean up orphaned OPEN trades (no order IDs) → mark CANCELLED
+- Check for existing OPEN trades in DB before creating new ones
+- Warn about unmanaged LONG positions
 
 ---
 
-## Section 2: No Open Position (IDLE State)
+## SECTION 2: No Open Position (IDLE State)
 
 ### 2.1 — Entry Algorithm
 
-The bot monitors BTC/USDT price and evaluates these conditions every tick:
+The bot monitors BTC/USDT price via WebSocket and evaluates entry conditions every tick:
 
-#### Entry Conditions (evaluated in order)
+#### Entry Conditions (evaluated in order, first failure blocks)
 
 | # | Condition | Config Key | Default |
 |---|-----------|-----------|---------|
@@ -103,24 +101,43 @@ The bot monitors BTC/USDT price and evaluates these conditions every tick:
 | 7 | High confirmation timer | `high_confirm_seconds` | 5s |
 
 When ALL conditions pass:
-1. Calculate order price: `currentPrice + (currentPrice * entryOffsetPct)`
+1. Calculate order price: `roundPrice(currentPrice + currentPrice * entryOffsetPct)`
    - Minimum offset: `entryOffsetMin` (default $50)
-2. Place short limit sell order at rounded price (0.1 step)
-3. Start cancel timer for `orderCancelMinutes`
+   - All prices rounded to 0.1 step (WhiteBit requirement)
+2. Place short limit sell order on WhiteBit
+3. Start cancel timer for `orderCancelMinutes` (default 10)
 4. Save trade to DB as OPEN
 5. Transition to ORDER_PLACED
 
-### 2.2 — Order Fill Detection
+### 2.2 — Order Fill Detection (ORDER_PLACED state)
 
-While in ORDER_PLACED, every 5 seconds:
+Every **15 seconds** (`pollOrderStatus`):
 1. Check if order is in active orders list → still waiting
-2. Check execution history → filled → place TP/SL → POSITION_OPEN
-3. Not in either → cancelled externally → mark CANCELLED → IDLE
+2. Check execution history → filled → get fill price → place TP/SL → POSITION_OPEN
+3. Not in either → order was cancelled/expired → mark CANCELLED → IDLE
 
-If cancel timer fires before fill:
-1. Check if order was filled first (safeCancelOrder)
-2. If filled: trigger fill flow (TP/SL placement)
-3. If not filled: cancel on WhiteBit, mark CANCELLED, back to IDLE
+**Cancel timer** fires after `orderCancelMinutes`:
+1. `safeCancelOrder`: try CancelOrder on WhiteBit
+2. If cancel fails: check if order was filled (`IsOrderFilled`)
+3. If filled: trigger fill flow (place TP/SL, transition to POSITION_OPEN)
+4. If not filled: mark CANCELLED, back to IDLE
+
+---
+
+## Position Adoption (SyncOnEnable)
+
+When the bot is enabled (STOP → START):
+
+1. **Clean orphans**: Mark OPEN trades with no order IDs as CANCELLED
+2. **DB Recovery**: Check for OPEN trades with TP/SL IDs, restore POSITION_OPEN state
+3. **Active Orders**: Check WhiteBit for active sell orders → adopt as ORDER_PLACED
+4. **Open Positions**: Check WhiteBit for open short positions → adopt as POSITION_OPEN
+   - Wait for price feed (up to 30s)
+   - Check DB for existing OPEN trade first (prevent duplicates)
+   - Place TP at `currentPrice - tpDistance` (below market)
+   - Place SL at `entryPrice + slDistance` (above entry)
+   - Use actual position amount (not "0")
+5. **Warn about longs**: Log WARNING if unmanaged LONG positions exist
 
 ---
 
@@ -145,17 +162,28 @@ If cancel timer fires before fill:
 
 ---
 
-## Position Adoption (SyncOnEnable)
+## Admin Commands
 
-When the bot is enabled (STOP → START), it checks for existing state:
+**Delete all trade history and start fresh:**
+```bash
+docker compose exec postgres psql -U bitcoin -d bitcoinrobot -c "DELETE FROM trades;"
+docker compose restart backend
+```
 
-1. **DB Recovery**: Check for OPEN trades in database, restore state
-2. **Active Orders**: Check WhiteBit for active sell orders, adopt as ORDER_PLACED
-3. **Open Positions**: Check WhiteBit for open short positions, adopt as POSITION_OPEN
-   - Wait for price feed (up to 30s)
-   - Place TP at `currentPrice - tpDistance`
-   - Place SL at `entryPrice + slDistance`
-   - Use actual position amount (not "0")
+**Check open positions on WhiteBit:**
+```bash
+docker compose logs backend --tail=50 | grep -i "position"
+```
+
+**Check order status:**
+```bash
+docker compose logs backend --tail=50 | grep -i "TP\|SL\|filled\|cancel\|error"
+```
+
+**Force redeploy:**
+```bash
+cd /root/binance-robot && git pull && docker compose up --build -d
+```
 
 ---
 
@@ -163,24 +191,30 @@ When the bot is enabled (STOP → START), it checks for existing state:
 
 - **Backend**: Go (port 8080) — state machine, WhiteBit API, PostgreSQL, Redis, WebSocket
 - **Frontend**: Next.js (port 3000) — real-time dashboard
-- **Deploy**: Docker Compose on Hetzner CX22, Nginx reverse proxy
+- **Deploy**: Docker Compose on Hetzner CX22 (Ubuntu), Nginx reverse proxy
 - **Exchange**: WhiteBit (BTC_PERP market, collateral trading)
+- **Dashboard**: akil.cooleta.al
 
 ## Key Files
 
-- `backend/internal/algorithm/statemachine.go` — main bot logic
-- `backend/internal/algorithm/pricewindow.go` — 10-min high tracking
-- `backend/internal/orders/manager.go` — WhiteBit order management
-- `backend/internal/whitebit/client.go` — WhiteBit API client
-- `backend/internal/database/db.go` — PostgreSQL persistence
-- `frontend/src/components/` — dashboard UI components
+| File | Purpose |
+|------|---------|
+| `backend/internal/algorithm/statemachine.go` | Main bot logic, state machine |
+| `backend/internal/algorithm/pricewindow.go` | 10-min high tracking |
+| `backend/internal/orders/manager.go` | WhiteBit order management |
+| `backend/internal/whitebit/client.go` | WhiteBit API client |
+| `backend/internal/database/db.go` | PostgreSQL persistence |
+| `frontend/src/components/` | Dashboard UI components |
+| `ALGORITHM.md` | This file — algorithm documentation |
 
 ## WhiteBit API Notes
 
-- Market: `BTC_PERP` (bot) / `BTC-PERP` (WhiteBit positions response)
-- Price step: 0.1 (all prices must be rounded)
-- Amount "0" = close entire position (works for bot-created, may fail for adopted)
-- Conditional orders endpoint (`/api/v4/orders/conditional`) not available
-- Cancel conditional: `/api/v4/order/conditional-cancel`
-- Positions: `/api/v4/collateral-account/positions/open`
-- Position side determined by amount sign (negative = short)
+- Market: `BTC_PERP` (bot internal) / `BTC-PERP` (positions response) — normalized in code
+- Price step: **0.1** (all prices must be rounded via `roundPrice()`)
+- Amount `"0"` = close entire position (works for bot-created orders, fails for adopted)
+- Use actual BTC amount for adopted positions (e.g., `"0.007"`)
+- `/api/v4/orders/conditional` — NOT available (404), don't use
+- `/api/v4/order/conditional-cancel` — works for cancelling SL stop-limits
+- `/api/v4/collateral-account/positions/open` — returns open positions
+- Position side: determined by `amount` sign (negative = short, positive = long)
+- TP buy limit above market → fills immediately (use price BELOW market for shorts)

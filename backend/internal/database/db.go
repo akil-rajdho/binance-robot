@@ -473,6 +473,15 @@ func (d *DB) GetTrades(limit int) ([]Trade, error) {
 	return trades, nil
 }
 
+// DeleteAllTrades removes all rows from the trades table.
+func (d *DB) DeleteAllTrades() error {
+	_, err := d.db.Exec("DELETE FROM trades")
+	if err != nil {
+		return fmt.Errorf("database: DeleteAllTrades: %w", err)
+	}
+	return nil
+}
+
 // GetAllSettings returns all settings as a map.
 func (d *DB) GetAllSettings() (map[string]string, error) {
 	rows, err := d.db.Query(`SELECT key, value FROM settings`)

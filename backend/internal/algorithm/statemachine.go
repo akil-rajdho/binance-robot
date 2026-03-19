@@ -185,6 +185,9 @@ type StateMachine struct {
 	tpPrice      float64
 	slPrice      float64
 
+	// position tracking
+	positionAmount string // actual BTC amount of the position (e.g., "0.007")
+
 	// profit duration tracking
 	profitStartTime time.Time // when the position first became profitable
 	inProfit        bool      // whether the position is currently in profit
@@ -407,6 +410,7 @@ func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
 	sm.inProfit = false
 	sm.profitStartTime = time.Time{}
 	sm.tpTightened = false
+	sm.positionAmount = fmt.Sprintf("%.3f", sm.positionSizeUSDT/entryPrice*float64(sm.leverage))
 	// Reset entry offset on successful fill.
 	sm.entryOffset = sm.entryOffsetInitial
 	sm.state = StatePositionOpen
@@ -481,48 +485,75 @@ func (sm *StateMachine) checkPositionClosed(ctx context.Context) {
 	tradeID := sm.activeTradeID
 	sm.mu.Unlock()
 
+	// --- TP detection: regular limit order, can check active orders + execution history ---
 	tpFilled, err := sm.orderMgr.IsOrderFilled2(ctx, tpID)
 	if err != nil {
 		log.Printf("[StateMachine] IsOrderFilled2(TP %d) error: %v", tpID, err)
 		return
 	}
 
-	slFilled, err := sm.orderMgr.IsOrderFilled2(ctx, slID)
-	if err != nil {
-		log.Printf("[StateMachine] IsOrderFilled2(SL %d) error: %v", slID, err)
-		return
+	// --- SL detection: conditional order, can't query directly on WhiteBit.
+	// Instead, check if the short position still exists. If position is gone
+	// and TP wasn't filled → SL must have been triggered. ---
+	slFilled := false
+	if !tpFilled {
+		positions, posErr := sm.orderMgr.GetOpenPositions(ctx)
+		if posErr != nil {
+			log.Printf("[StateMachine] GetOpenPositions error during SL check: %v", posErr)
+			return
+		}
+		hasShortPosition := false
+		for _, p := range positions {
+			if p.Side == "short" {
+				hasShortPosition = true
+				break
+			}
+		}
+		if !hasShortPosition {
+			log.Printf("[StateMachine] Position gone, TP not filled → SL triggered (SL order %d)", slID)
+			slFilled = true
+		}
 	}
 
 	if !tpFilled && !slFilled {
 		return
 	}
 
+	// Compute exit price, PnL, and status; cancel the opposing order.
 	var exitPrice float64
 	var pnl float64
 	var status string
+	contractSize := sm.positionSizeUSDT / sm.activeOrderPrice * float64(sm.leverage)
 
 	if tpFilled {
 		exitPrice = tpPrice
-		// Short position: profit = (entryPrice - exitPrice) * contractSize
-		contractSize := sm.positionSizeUSDT / sm.activeOrderPrice * float64(sm.leverage)
 		pnl = (entryPrice - exitPrice) * contractSize
 		status = "TP_HIT"
-		// Cancel the SL
 		if cancelErr := sm.orderMgr.CancelOrder(ctx, slID); cancelErr != nil {
 			log.Printf("[StateMachine] CancelOrder(SL %d) error: %v", slID, cancelErr)
 		}
 		log.Printf("[StateMachine] TP hit for trade %d — exitPrice=%.2f, pnl=%.2f", tradeID, exitPrice, pnl)
 	} else {
-		// SL filled
 		exitPrice = slPrice
-		contractSize := sm.positionSizeUSDT / sm.activeOrderPrice * float64(sm.leverage)
-		pnl = (entryPrice - exitPrice) * contractSize // negative for a loss on short
+		pnl = (entryPrice - exitPrice) * contractSize
 		status = "SL_HIT"
-		// Cancel the TP
 		if cancelErr := sm.orderMgr.CancelOrder(ctx, tpID); cancelErr != nil {
 			log.Printf("[StateMachine] CancelOrder(TP %d) error: %v", tpID, cancelErr)
 		}
 		log.Printf("[StateMachine] SL hit for trade %d — exitPrice=%.2f, pnl=%.2f", tradeID, exitPrice, pnl)
+	}
+
+	// Cancel all remaining active orders for the market to prevent residuals
+	activeOrders, aoErr := sm.orderMgr.GetActiveShortOrders(ctx)
+	if aoErr != nil {
+		log.Printf("[StateMachine] Post-close GetActiveShortOrders error: %v", aoErr)
+	} else {
+		for _, ao := range activeOrders {
+			log.Printf("[StateMachine] Cancelling residual order #%d", ao.OrderID)
+			if cancelErr := sm.orderMgr.CancelOrder(ctx, ao.OrderID); cancelErr != nil {
+				log.Printf("[StateMachine] CancelOrder(residual %d) error: %v", ao.OrderID, cancelErr)
+			}
+		}
 	}
 
 	// Persist trade update
@@ -546,6 +577,7 @@ func (sm *StateMachine) checkPositionClosed(ctx context.Context) {
 	sm.tpPrice = 0
 	sm.slPrice = 0
 	sm.tpTightened = false
+	sm.positionAmount = ""
 	sm.entryOffset = sm.entryOffsetInitial // reset adaptive offset after successful trade close
 	algoState := sm.buildAlgoState()
 	sm.mu.Unlock()
@@ -556,14 +588,30 @@ func (sm *StateMachine) checkPositionClosed(ctx context.Context) {
 	// Verify position is actually closed and no residual orders/positions exist
 	go func() {
 		time.Sleep(2 * time.Second) // brief delay for exchange propagation
-		positions, err := sm.orderMgr.GetOpenPositions(context.Background())
+		bgCtx := context.Background()
+
+		// Second-pass order cancellation to catch any orders that appeared after the first sweep
+		lateOrders, lateErr := sm.orderMgr.GetActiveShortOrders(bgCtx)
+		if lateErr != nil {
+			log.Printf("[StateMachine] Post-close late order check error: %v", lateErr)
+		} else {
+			for _, ao := range lateOrders {
+				log.Printf("[StateMachine] Cancelling late residual order #%d", ao.OrderID)
+				sm.orderMgr.CancelOrder(bgCtx, ao.OrderID)
+			}
+		}
+
+		// Check for residual positions
+		positions, err := sm.orderMgr.GetOpenPositions(bgCtx)
 		if err != nil {
 			log.Printf("[StateMachine] Post-close position check error: %v", err)
 			return
 		}
 		for _, p := range positions {
-			if p.Side == "short" || p.Side == "long" {
-				log.Printf("[StateMachine] WARNING: residual %s position found after close: %.3f BTC @ $%.2f", p.Side, p.Amount, p.BasePrice)
+			if p.Side == "long" {
+				log.Printf("[StateMachine] WARNING: residual LONG position found after close (likely created by TP buy): %.3f BTC @ $%.2f — manual intervention required", p.Amount, p.BasePrice)
+			} else if p.Side == "short" {
+				log.Printf("[StateMachine] WARNING: residual SHORT position found after close: %.3f BTC @ $%.2f", p.Amount, p.BasePrice)
 			}
 		}
 	}()
@@ -585,14 +633,18 @@ func (sm *StateMachine) forceClosePosition(ctx context.Context) {
 	entryPrice := sm.activeOrderPrice
 	posSize := sm.positionSizeUSDT
 	leverage := sm.leverage
+	amount := sm.positionAmount
 	sm.mu.Unlock()
 
 	tightTP := currentPrice + 15.0
 
-	// Compute the position amount for the order
-	amount := "0"
-	if entryPrice > 0 {
-		amount = fmt.Sprintf("%.3f", posSize/entryPrice*float64(leverage))
+	// Use stored position amount; fall back to calculated if not set
+	if amount == "" {
+		if entryPrice > 0 {
+			amount = fmt.Sprintf("%.3f", posSize/entryPrice*float64(leverage))
+		} else {
+			amount = "0"
+		}
 	}
 
 	log.Printf("[StateMachine] Position profitable >1min at $%.2f — tightening TP #%d → $%.2f",
@@ -1143,6 +1195,7 @@ func (sm *StateMachine) SyncOnEnable() {
 		sm.slOrderID = slOrderID
 		sm.tpPrice = tpPrice
 		sm.slPrice = slPrice
+		sm.positionAmount = posAmount
 		algoState := sm.buildAlgoState()
 		sm.mu.Unlock()
 
@@ -1794,6 +1847,17 @@ func (sm *StateMachine) RecoverOpenTrades(ctx context.Context) error {
 			}
 			log.Printf("[Recovery] Trade #%d was closed while server was offline, status=%s, pnl=$%.2f",
 				trade.ID, status, pnl)
+
+			// Cancel all remaining active orders to prevent residuals from the offline close
+			activeOrders, aoErr := sm.orderMgr.GetActiveShortOrders(ctx)
+			if aoErr != nil {
+				log.Printf("[Recovery] Post-close GetActiveShortOrders error: %v", aoErr)
+			} else {
+				for _, ao := range activeOrders {
+					log.Printf("[Recovery] Cancelling residual order #%d", ao.OrderID)
+					sm.orderMgr.CancelOrder(ctx, ao.OrderID)
+				}
+			}
 			return nil
 		}
 
@@ -1807,6 +1871,9 @@ func (sm *StateMachine) RecoverOpenTrades(ctx context.Context) error {
 		sm.slOrderID = trade.SLOrderID
 		sm.tpPrice = trade.TPPrice
 		sm.slPrice = trade.SLPrice
+		if trade.OrderPrice > 0 {
+			sm.positionAmount = fmt.Sprintf("%.3f", sm.positionSizeUSDT/trade.OrderPrice*float64(sm.leverage))
+		}
 		sm.mu.Unlock()
 
 		log.Printf("[Recovery] Restored POSITION_OPEN state for trade #%d (TP=%d, SL=%d)",
