@@ -571,8 +571,14 @@ func (sm *StateMachine) forceClosePosition(ctx context.Context) {
 	// Cancel the existing far TP order
 	if tpOrderID != 0 {
 		if err := sm.orderMgr.CancelOrder(ctx, tpOrderID); err != nil {
-			log.Printf("[StateMachine] Warning: failed to cancel old TP #%d: %v — will retry next tick", tpOrderID, err)
-			// Don't proceed if we can't cancel; the old TP might still be active
+			log.Printf("[StateMachine] Warning: failed to cancel old TP #%d: %v — checking if already filled", tpOrderID, err)
+			// TP may have already filled (e.g., buy limit above market fills instantly).
+			// Let checkPositionClosed handle the fill detection on the next poll.
+			// Reset profit timer so we don't spam retries.
+			sm.mu.Lock()
+			sm.inProfit = false
+			sm.profitStartTime = time.Time{}
+			sm.mu.Unlock()
 			return
 		}
 	}
