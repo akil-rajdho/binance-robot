@@ -64,6 +64,7 @@ func New(dsn string) (*DB, error) {
 	migrateDefaultSetting(sqlDB, "150", "sl_distance", "200")
 	migrateMinGapPct(sqlDB)
 	migrateDefaultSetting(sqlDB, "70", "tp_distance", "75")
+	migrateDefaultSetting(sqlDB, "15", "order_cancel_minutes", "10")
 
 	return d, nil
 }
@@ -125,7 +126,7 @@ func (d *DB) insertDefaultSettings() error {
 		"entry_offset_initial": "150",
 		"entry_offset_step":    "20",
 		"entry_offset_min":     "50",
-		"order_cancel_minutes": "10",
+		"order_cancel_minutes": "15",
 		"tp_distance":            "70",
 		"sl_distance":            "150",
 		"min_gap_pct":            "0.0010",

@@ -135,6 +135,15 @@ func main() {
 	}
 
 	// 10. Create price feed
+	// Authenticated WebSocket for instant order/position updates
+	userFeed := whitebit.NewUserFeed(wbClient, "BTC_PERP")
+	userFeed.OnOrderExecuted = func(event whitebit.ExecutedOrderEvent) {
+		sm.OnOrderExecuted(event.OrderID, event.Price, event.Side)
+	}
+	userFeed.OnOrderPending = func(event whitebit.PendingOrderEvent) {
+		sm.OnOrderPending(event.EventType, event.OrderID)
+	}
+
 	priceFeed := whitebit.NewPriceFeed("BTC_PERP", "1", func(candle whitebit.Candle) {
 		hub.BroadcastJSON("candle", candle)
 		sm.OnCandle(candle.High, candle.Low, candle.Close, time.Unix(candle.Time, 0))
@@ -179,6 +188,9 @@ func main() {
 			log.Printf("price feed stopped: %v", err)
 		}
 	}()
+
+	// Start authenticated user feed for instant fill detection
+	go userFeed.Start(ctx)
 
 	// Start HTTP server
 	addr := ":" + cfg.Port

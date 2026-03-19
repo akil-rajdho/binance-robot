@@ -150,6 +150,22 @@ func (c *Client) doRequest(ctx context.Context, endpoint string, body map[string
 	return nil
 }
 
+// GetWebSocketToken fetches an authenticated WebSocket token for private streams.
+func (c *Client) GetWebSocketToken() (string, error) {
+	const endpoint = "/api/v4/profile/websocket_token"
+	body := map[string]interface{}{}
+	var result struct {
+		WebsocketToken string `json:"websocket_token"`
+	}
+	if err := c.doRequest(context.Background(), endpoint, body, &result); err != nil {
+		return "", fmt.Errorf("whitebit: GetWebSocketToken: %w", err)
+	}
+	if result.WebsocketToken == "" {
+		return "", fmt.Errorf("whitebit: GetWebSocketToken: empty token")
+	}
+	return result.WebsocketToken, nil
+}
+
 // PlaceCollateralLimitOrder places a collateral limit order on the given market.
 // side should be "buy" or "sell". positionSide should be "SHORT", "LONG", or "" for one-way mode.
 func (c *Client) PlaceCollateralLimitOrder(market, side, amount, price, positionSide string) (*OrderResult, error) {

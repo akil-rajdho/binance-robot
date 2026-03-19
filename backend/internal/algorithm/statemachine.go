@@ -121,6 +121,8 @@ type OrderManager interface {
 	// Both false means the order is still active.
 	IsOrderFilled(ctx context.Context, orderID int64) (filled bool, cancelled bool, fillPrice float64, err error)
 	IsOrderFilled2(ctx context.Context, orderID int64) (filled bool, err error) // for TP/SL
+	// Deprecated: PlaceMarketClose uses a market order which should NOT be used for TP/SL.
+	// Kept for interface compatibility but not called by the state machine.
 	PlaceMarketClose(ctx context.Context) (orderID int64, err error)
 	// GetActiveShortOrders returns all active sell orders for the market.
 	GetActiveShortOrders(ctx context.Context) ([]ActiveOrder, error)
@@ -246,7 +248,7 @@ func NewStateMachine(priceWindow *PriceWindow, orderMgr OrderManager, db DBStore
 		entryOffsetInitial: 150.0,
 		entryOffsetStep:    20.0,
 		entryOffsetMin:     50.0,
-		orderCancelMinutes: 10.0,
+		orderCancelMinutes: 15.0,
 		tpDistance:         70.0,
 		slDistance:         150.0,
 		entryOffset:        150.0,
@@ -276,11 +278,11 @@ func (sm *StateMachine) OnCandle(high, low, close_ float64, ts time.Time) {
 }
 
 // Start begins the polling loop that syncs order/position status with WhiteBit.
-// Poll interval is 15 s — fast enough to catch fills promptly while staying well
-// within WhiteBit API rate-limits (~10 req/s).
+// Poll interval is 30 s — safety fallback; WebSocket events are the primary
+// fill detection path.
 func (sm *StateMachine) Start(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(15 * time.Second)
+		ticker := time.NewTicker(30 * time.Second) // safety fallback; WebSocket events are primary
 		defer ticker.Stop()
 
 		for {
@@ -671,6 +673,10 @@ func (sm *StateMachine) forceClosePosition(ctx context.Context) {
 	sm.mu.Lock()
 	sm.tpOrderID = newTPOrderID
 	sm.tpPrice = tightTP
+	// Persist the updated TP order ID to DB
+	if dbErr := sm.db.UpdateOrderIDs(sm.activeTradeID, newTPOrderID, sm.slOrderID); dbErr != nil {
+		log.Printf("[StateMachine] forceClosePosition: UpdateOrderIDs error: %v", dbErr)
+	}
 	// Mark TP as tightened so we never re-tighten; reset profit timer
 	sm.tpTightened = true
 	sm.inProfit = false
@@ -1984,4 +1990,68 @@ func (sm *StateMachine) RecoverOpenTrades(ctx context.Context) error {
 		log.Printf("[Recovery] Warning: UpdateTrade(CANCELLED) for trade #%d: %v", trade.ID, dbErr)
 	}
 	return nil
+}
+
+// OnOrderExecuted handles a WebSocket order execution event.
+// Called when an order fills on WhiteBit. This is the fast path for fill detection.
+func (sm *StateMachine) OnOrderExecuted(orderID int64, fillPrice float64, side string) {
+	sm.mu.Lock()
+
+	switch {
+	case sm.state == StateOrderPlaced && orderID == sm.activeOrderID:
+		// Entry order filled — place TP/SL
+		log.Printf("[StateMachine] WS: Entry order %d filled at $%.2f", orderID, fillPrice)
+		sm.mu.Unlock()
+		sm.checkOrderFilled(sm.ctx)
+		return
+
+	case sm.state == StatePositionOpen && orderID == sm.tpOrderID:
+		// TP filled — cancel SL, close position
+		log.Printf("[StateMachine] WS: TP order %d filled at $%.2f", orderID, fillPrice)
+		slID := sm.slOrderID
+		sm.mu.Unlock()
+		// Cancel the SL
+		if slID != 0 {
+			if err := sm.orderMgr.CancelOrder(sm.ctx, slID); err != nil {
+				log.Printf("[StateMachine] WS: CancelOrder(SL %d) error: %v", slID, err)
+			}
+		}
+		// Let checkPositionClosed handle the full close flow on next poll
+		// (it has all the PnL calculation and DB update logic)
+		return
+
+	case sm.state == StatePositionOpen && orderID == sm.slOrderID:
+		// SL filled — cancel TP, close position
+		log.Printf("[StateMachine] WS: SL order %d filled at $%.2f", orderID, fillPrice)
+		tpID := sm.tpOrderID
+		sm.mu.Unlock()
+		// Cancel the TP
+		if tpID != 0 {
+			if err := sm.orderMgr.CancelOrder(sm.ctx, tpID); err != nil {
+				log.Printf("[StateMachine] WS: CancelOrder(TP %d) error: %v", tpID, err)
+			}
+		}
+		return
+
+	default:
+		sm.mu.Unlock()
+	}
+}
+
+// OnOrderPending handles WebSocket order pending events.
+// EventType: 1=new, 2=modified, 3=removed (cancelled)
+func (sm *StateMachine) OnOrderPending(eventType int, orderID int64) {
+	if eventType != 3 {
+		return // only care about removals (cancellations)
+	}
+
+	sm.mu.Lock()
+	if sm.state == StateOrderPlaced && orderID == sm.activeOrderID {
+		log.Printf("[StateMachine] WS: Entry order %d removed/cancelled externally", orderID)
+		sm.mu.Unlock()
+		// Let checkOrderFilled handle the transition (it checks if filled vs cancelled)
+		sm.checkOrderFilled(sm.ctx)
+		return
+	}
+	sm.mu.Unlock()
 }
