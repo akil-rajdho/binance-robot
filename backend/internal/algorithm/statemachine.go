@@ -568,22 +568,15 @@ func (sm *StateMachine) forceClosePosition(ctx context.Context) {
 	log.Printf("[StateMachine] Position profitable >1min at $%.2f — tightening TP #%d → $%.2f",
 		currentPrice, tpOrderID, tightTP)
 
-	// Cancel the existing far TP order
+	// Cancel the existing far TP order (ignore errors — order may already be filled/gone)
 	if tpOrderID != 0 {
 		if err := sm.orderMgr.CancelOrder(ctx, tpOrderID); err != nil {
-			log.Printf("[StateMachine] Warning: failed to cancel old TP #%d: %v — checking if already filled", tpOrderID, err)
-			// TP may have already filled (e.g., buy limit above market fills instantly).
-			// Let checkPositionClosed handle the fill detection on the next poll.
-			// Reset profit timer so we don't spam retries.
-			sm.mu.Lock()
-			sm.inProfit = false
-			sm.profitStartTime = time.Time{}
-			sm.mu.Unlock()
-			return
+			log.Printf("[StateMachine] Warning: failed to cancel old TP #%d: %v — proceeding to place new TP", tpOrderID, err)
 		}
 	}
 
 	// Place a new tight limit BUY at currentPrice + $15 to lock in profit
+	tightTP = roundPrice(tightTP)
 	newTPOrderID, err := sm.orderMgr.PlaceTakeProfit(ctx, 0, tightTP, "0")
 	if err != nil {
 		log.Printf("[StateMachine] ERROR: failed to place tight TP at $%.2f: %v", tightTP, err)
