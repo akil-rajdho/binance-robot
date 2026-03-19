@@ -975,7 +975,7 @@ func (sm *StateMachine) SyncOnEnable() {
 	cancelMins := sm.orderCancelMinutes
 	sm.mu.Unlock()
 
-	// Clean up any orphaned OPEN trades with no TP/SL (failed adoption attempts)
+	// Clean up any orphaned OPEN trades (failed adoption attempts or stale state)
 	if openTrades, err := sm.db.GetOpenTrades(); err == nil {
 		for _, t := range openTrades {
 			if t.OrderID == 0 && t.TPOrderID == 0 && t.SLOrderID == 0 {
@@ -984,6 +984,17 @@ func (sm *StateMachine) SyncOnEnable() {
 			}
 		}
 	}
+
+	// Warn about non-short positions (bot only manages shorts)
+	defer func() {
+		if positions, err := sm.orderMgr.GetOpenPositions(sm.ctx); err == nil {
+			for _, p := range positions {
+				if p.Side == "long" {
+					log.Printf("[StateMachine] WARNING: unmanaged LONG position found: %.3f BTC @ $%.2f — close manually!", p.Amount, p.BasePrice)
+				}
+			}
+		}
+	}()
 
 	// First: check DB for any open trades we might have missed.
 	if err := sm.RecoverOpenTrades(sm.ctx); err != nil {
