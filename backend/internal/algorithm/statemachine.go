@@ -370,8 +370,8 @@ func (sm *StateMachine) checkForUntrackedPositions(ctx context.Context) {
 	log.Printf("[StateMachine] Detected untracked short position: %.3f BTC @ $%.2f — adopting", shortPos.Amount, shortPos.BasePrice)
 
 	entryPrice := shortPos.BasePrice
-	tpPrice := roundPrice(price - tpDist)
-	slPrice := roundPrice(entryPrice + slDist)
+	tpPrice := roundPrice(entryPrice - tpDist)   // TP below entry (profit for short)
+	slPrice := roundPrice(entryPrice + slDist)    // SL above entry (loss for short)
 	posAmount := fmt.Sprintf("%.3f", shortPos.Amount)
 
 	snapshot := ReasoningSnapshot{
@@ -1256,9 +1256,8 @@ func (sm *StateMachine) SyncOnEnable() {
 		// Adopt the position: create a DB trade entry and transition to POSITION_OPEN
 		entryPrice := shortPos.BasePrice
 
-		// TP must be below current market price to avoid immediate fill.
-		// For a short in profit: TP below current price, SL above entry.
-		tpPrice := roundPrice(price - tpDist)
+		// For a short: TP below entry (profit), SL above entry (loss)
+		tpPrice := roundPrice(entryPrice - tpDist)
 		slPrice := roundPrice(entryPrice + slDist)
 
 		posAmount := fmt.Sprintf("%.3f", shortPos.Amount) // actual BTC amount, not "0"
