@@ -131,18 +131,11 @@ func (m *Manager) IsOrderFilled2(_ context.Context, orderID int64) (filled bool,
 		}
 	}
 
-	// Check conditional active orders (covers SL which is a stop-limit)
-	conditionalOrders, err := m.client.GetActiveConditionalOrders(m.market)
-	if err != nil {
-		// Non-fatal: API key may lack permission. Log and continue to execution history check.
-		fmt.Printf("[Orders] IsOrderFilled2: GetActiveConditionalOrders error (non-fatal): %v\n", err)
-	} else {
-		for _, o := range conditionalOrders {
-			if o.OrderID == orderID {
-				return false, nil // still active
-			}
-		}
-	}
+	// Note: conditional orders (SL stop-limit) are NOT returned by /api/v4/orders.
+	// WhiteBit has no accessible endpoint to query active conditional orders.
+	// We rely on execution history to detect SL fills. If the SL is still active
+	// (not in regular orders, not in execution history), we return filled=false
+	// which is safe — the next poll will re-check.
 
 	// Not in any active list — check execution history
 	found, _, execErr := m.client.GetExecutedOrder(m.market, orderID)
