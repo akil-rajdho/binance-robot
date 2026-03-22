@@ -37,7 +37,7 @@ func main() {
 	wbClient := whitebit.NewClient(cfg.WhitebitAPIKey, cfg.WhitebitAPISecret)
 
 	// 4. Create order manager
-	orderMgr := orders.NewManager(wbClient, "BTC_PERP")
+	orderMgr := orders.NewManager(wbClient, "BTC_USDT")
 
 	// 5. Create price window (10 minutes)
 	priceWindow := algorithm.NewPriceWindow(10 * time.Minute)
@@ -77,7 +77,7 @@ func main() {
 	}
 
 	// 8a. Seed price window and cache historical candles for the chart.
-	historicalCandles, err := wbClient.GetKlines("BTC_PERP", 60, 200)
+	historicalCandles, err := wbClient.GetKlines("BTC_USDT", 60, 200)
 	if err != nil {
 		log.Printf("warn: failed to fetch historical klines: %v", err)
 	} else {
@@ -136,7 +136,7 @@ func main() {
 
 	// 10. Create price feed
 	// Authenticated WebSocket for instant order/position updates
-	userFeed := whitebit.NewUserFeed(wbClient, "BTC_PERP")
+	userFeed := whitebit.NewUserFeed(wbClient, "BTC_USDT")
 	userFeed.OnOrderExecuted = func(event whitebit.ExecutedOrderEvent) {
 		sm.OnOrderExecuted(event.OrderID, event.Price, event.Side)
 	}
@@ -144,7 +144,7 @@ func main() {
 		sm.OnOrderPending(event.EventType, event.OrderID)
 	}
 
-	priceFeed := whitebit.NewPriceFeed("BTC_PERP", "1", func(candle whitebit.Candle) {
+	priceFeed := whitebit.NewPriceFeed("BTC_USDT", "1", func(candle whitebit.Candle) {
 		hub.BroadcastJSON("candle", candle)
 		sm.OnCandle(candle.High, candle.Low, candle.Close, time.Unix(candle.Time, 0))
 	}, func(price float64) {

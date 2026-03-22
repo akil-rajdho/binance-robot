@@ -316,6 +316,93 @@ func (c *Client) PlaceStopLimitOrder(market, side, amount, activationPrice, pric
 	return &result, nil
 }
 
+// PlaceMarginLimitOrder places a margin limit order.
+func (c *Client) PlaceMarginLimitOrder(market, side, amount, price string) (*OrderResult, error) {
+	const endpoint = "/api/v4/order/margin"
+	body := map[string]interface{}{
+		"market": market,
+		"side":   side,
+		"amount": amount,
+		"price":  price,
+	}
+	var result OrderResult
+	if err := c.doRequest(context.Background(), endpoint, body, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// PlaceMarginMarketOrder places a margin market order.
+// amount must be the exact position size — no "0" shortcut for close-entire.
+func (c *Client) PlaceMarginMarketOrder(market, side, amount string) (*OrderResult, error) {
+	const endpoint = "/api/v4/order/market"
+	body := map[string]interface{}{
+		"market": market,
+		"side":   side,
+		"amount": amount,
+	}
+	var result OrderResult
+	if err := c.doRequest(context.Background(), endpoint, body, &result); err != nil {
+		return nil, fmt.Errorf("whitebit: PlaceMarginMarketOrder: %w", err)
+	}
+	return &result, nil
+}
+
+// PlaceMarginStopLimitOrder places a stop-limit order for margin trading.
+func (c *Client) PlaceMarginStopLimitOrder(market, side, amount, activationPrice, price string) (*OrderResult, error) {
+	const endpoint = "/api/v4/order/stop-limit"
+	body := map[string]interface{}{
+		"market":           market,
+		"side":             side,
+		"amount":           amount,
+		"activation_price": activationPrice,
+		"price":            price,
+	}
+	var result OrderResult
+	if err := c.doRequest(context.Background(), endpoint, body, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetMarginPositions returns all open margin positions.
+func (c *Client) GetMarginPositions() ([]Position, error) {
+	const endpoint = "/api/v4/trade-account/margin/positions"
+	body := map[string]interface{}{}
+	var result []Position
+	if err := c.doRequest(context.Background(), endpoint, body, &result); err != nil {
+		return nil, err
+	}
+	log.Printf("[WhiteBit] GetMarginPositions: found %d positions", len(result))
+	for i, p := range result {
+		log.Printf("[WhiteBit]   position[%d]: market=%s side=%s amount=%s basePrice=%s", i, p.Market, p.Side, p.Amount, p.BasePrice)
+	}
+	return result, nil
+}
+
+// GetMarginBalance returns the available USDT balance in the margin account.
+func (c *Client) GetMarginBalance() (float64, error) {
+	const endpoint = "/api/v4/trade-account/margin/balance"
+	body := map[string]interface{}{
+		"ticker": "USDT",
+	}
+	var raw map[string]struct {
+		Available string `json:"available"`
+	}
+	if err := c.doRequest(context.Background(), endpoint, body, &raw); err != nil {
+		return 0, err
+	}
+	entry, ok := raw["USDT"]
+	if !ok {
+		return 0, fmt.Errorf("whitebit: USDT margin balance not found in response")
+	}
+	balance, err := strconv.ParseFloat(entry.Available, 64)
+	if err != nil {
+		return 0, fmt.Errorf("whitebit: parse USDT margin balance %q: %w", entry.Available, err)
+	}
+	return balance, nil
+}
+
 // GetBalance returns the available USDT balance in the trade account.
 func (c *Client) GetBalance() (float64, error) {
 	const endpoint = "/api/v4/trade-account/balance"

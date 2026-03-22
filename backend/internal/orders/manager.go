@@ -14,7 +14,7 @@ import (
 // Manager implements algorithm.OrderManager using the WhiteBit client.
 type Manager struct {
 	client *whitebit.Client
-	market string // e.g. "BTC_PERP"
+	market string // e.g. "BTC_USDT"
 }
 
 // NewManager creates a new order Manager for the given market.
@@ -25,25 +25,22 @@ func NewManager(client *whitebit.Client, market string) *Manager {
 	}
 }
 
-// PlaceShortLimitOrder places a collateral limit sell order on the market.
+// PlaceShortLimitOrder places a margin limit sell order on the market.
 func (m *Manager) PlaceShortLimitOrder(_ context.Context, price float64, amount string) (orderID int64, err error) {
 	priceStr := fmt.Sprintf("%.1f", price)
-	result, err := m.client.PlaceCollateralLimitOrder(m.market, "sell", amount, priceStr, "")
+	result, err := m.client.PlaceMarginLimitOrder(m.market, "sell", amount, priceStr)
 	if err != nil {
 		return 0, fmt.Errorf("orders: PlaceShortLimitOrder: %w", err)
 	}
 	return result.OrderID, nil
 }
 
-// CancelOrder cancels an order by ID. It tries the regular collateral limit cancel first,
-// then falls back to the conditional cancel. This handles both entry/TP orders (regular limit)
-// and SL orders (conditional stop-limit) with a single call.
+// CancelOrder cancels an order by ID. It tries the regular limit cancel first,
+// then falls back to the conditional cancel for stop-limit orders.
 func (m *Manager) CancelOrder(_ context.Context, orderID int64) error {
-	// Try regular collateral limit cancel first (entry order, TP order)
 	if err := m.client.CancelCollateralLimitOrder(m.market, orderID); err == nil {
 		return nil
 	}
-	// Fall back to conditional cancel (stop-loss order)
 	if err := m.client.CancelConditionalOrder(m.market, orderID); err == nil {
 		return nil
 	}
@@ -51,58 +48,38 @@ func (m *Manager) CancelOrder(_ context.Context, orderID int64) error {
 }
 
 // PlaceTakeProfit places a limit BUY order to close a short position at the given price.
-// Always tries amount "0" first (close entire position) to avoid residual positions,
-// then falls back to the specific amount if "0" is rejected.
+// For margin trading, amount must be specified — no "0" close-entire shortcut.
 func (m *Manager) PlaceTakeProfit(_ context.Context, _ int64, price float64, amount string) (orderID int64, err error) {
 	priceStr := fmt.Sprintf("%.1f", price)
-	// Try "0" first (close entire position) — most reliable
-	result, err := m.client.PlaceCollateralLimitOrder(m.market, "buy", "0", priceStr, "")
-	if err == nil {
-		return result.OrderID, nil
+	result, err := m.client.PlaceMarginLimitOrder(m.market, "buy", amount, priceStr)
+	if err != nil {
+		return 0, fmt.Errorf("orders: PlaceTakeProfit: %w", err)
 	}
-	// Fall back to specific amount if "0" was rejected
-	if amount != "" && amount != "0" {
-		log.Printf("[Orders] PlaceTakeProfit: amount '0' rejected, retrying with '%s'", amount)
-		result, err = m.client.PlaceCollateralLimitOrder(m.market, "buy", amount, priceStr, "")
-		if err == nil {
-			return result.OrderID, nil
-		}
-	}
-	return 0, fmt.Errorf("orders: PlaceTakeProfit: %w", err)
+	return result.OrderID, nil
 }
 
 // PlaceStopLoss places a stop-limit BUY order to close a short position when price rises to SL price.
 // Uses activation_price = SL price, limit price = SL price + 10 (slippage buffer).
-// Always tries amount "0" first (close entire position) to avoid residual positions,
-// then falls back to the specific amount if "0" is rejected.
+// For margin trading, amount must be specified — no "0" close-entire shortcut.
 func (m *Manager) PlaceStopLoss(_ context.Context, _ int64, price float64, amount string) (orderID int64, err error) {
 	priceStr := fmt.Sprintf("%.1f", price)
 	limitStr := fmt.Sprintf("%.1f", price+10)
-	// Try "0" first (close entire position) — most reliable
-	result, err := m.client.PlaceStopLimitOrder(m.market, "buy", "0", priceStr, limitStr)
-	if err == nil {
-		return result.OrderID, nil
+	result, err := m.client.PlaceMarginStopLimitOrder(m.market, "buy", amount, priceStr, limitStr)
+	if err != nil {
+		return 0, fmt.Errorf("orders: PlaceStopLoss: %w", err)
 	}
-	// Fall back to specific amount if "0" was rejected
-	if amount != "" && amount != "0" {
-		log.Printf("[Orders] PlaceStopLoss: amount '0' rejected, retrying with '%s'", amount)
-		result, err = m.client.PlaceStopLimitOrder(m.market, "buy", amount, priceStr, limitStr)
-		if err == nil {
-			return result.OrderID, nil
-		}
-	}
-	return 0, fmt.Errorf("orders: PlaceStopLoss: %w", err)
+	return result.OrderID, nil
 }
 
-// IsOrderFilled checks if the entry order (regular collateral limit) has been filled.
+// IsOrderFilled checks if the entry order (margin limit) has been filled.
 // Returns (filled, cancelled, fillPrice, error).
-// 1. If still in active collateral orders → filled=false, cancelled=false.
+// 1. If still in active orders → filled=false, cancelled=false.
 // 2. If in execution history → filled=true, cancelled=false.
 // 3. Absent from both → filled=false, cancelled=true.
 func (m *Manager) IsOrderFilled(_ context.Context, orderID int64) (filled bool, cancelled bool, fillPrice float64, err error) {
 	activeOrders, err := m.client.GetActiveCollateralLimitOrders(m.market)
 	if err != nil {
-		return false, false, 0, fmt.Errorf("orders: IsOrderFilled GetActiveCollateralLimitOrders: %w", err)
+		return false, false, 0, fmt.Errorf("orders: IsOrderFilled GetActiveOrders: %w", err)
 	}
 	for _, o := range activeOrders {
 		if o.OrderID == orderID {
@@ -110,7 +87,6 @@ func (m *Manager) IsOrderFilled(_ context.Context, orderID int64) (filled bool, 
 		}
 	}
 
-	// Not in active — check execution history
 	found, fp, execErr := m.client.GetExecutedOrder(m.market, orderID)
 	if execErr != nil {
 		return false, false, 0, fmt.Errorf("orders: IsOrderFilled GetExecutedOrder: %w", execErr)
@@ -119,14 +95,32 @@ func (m *Manager) IsOrderFilled(_ context.Context, orderID int64) (filled bool, 
 		return true, false, fp, nil
 	}
 
-	// Not in active, not in executed — was cancelled externally
 	return false, true, 0, nil
 }
 
 // PlaceMarketClose places a market buy order to close the entire short position.
-// amount "0" signals WhiteBit to close the full position.
+// For margin, queries the open position size first (no "amount=0" shortcut).
 func (m *Manager) PlaceMarketClose(_ context.Context) (orderID int64, err error) {
-	result, err := m.client.PlaceCollateralMarketOrder(m.market, "buy", "0")
+	positions, err := m.client.GetMarginPositions()
+	if err != nil {
+		return 0, fmt.Errorf("orders: PlaceMarketClose: get positions: %w", err)
+	}
+
+	amount := ""
+	for _, p := range positions {
+		normalizedPos := strings.ReplaceAll(strings.ToUpper(p.Market), "-", "_")
+		normalizedWant := strings.ReplaceAll(strings.ToUpper(m.market), "-", "_")
+		if normalizedPos == normalizedWant && strings.ToLower(p.Side) == "sell" {
+			amount = p.Amount
+			break
+		}
+	}
+
+	if amount == "" || amount == "0" {
+		return 0, fmt.Errorf("orders: PlaceMarketClose: no open short position found for %s", m.market)
+	}
+
+	result, err := m.client.PlaceMarginMarketOrder(m.market, "buy", amount)
 	if err != nil {
 		return 0, fmt.Errorf("orders: PlaceMarketClose: %w", err)
 	}
@@ -134,12 +128,11 @@ func (m *Manager) PlaceMarketClose(_ context.Context) (orderID int64, err error)
 }
 
 // IsOrderFilled2 checks if a TP or SL order has been filled.
-// It checks both regular and conditional active orders, then execution history.
+// Checks active orders, then execution history.
 func (m *Manager) IsOrderFilled2(_ context.Context, orderID int64) (filled bool, err error) {
-	// Check regular active orders (covers TP which is a collateral limit buy)
 	regularOrders, err := m.client.GetActiveCollateralLimitOrders(m.market)
 	if err != nil {
-		return false, fmt.Errorf("orders: IsOrderFilled2 GetActiveCollateralLimitOrders: %w", err)
+		return false, fmt.Errorf("orders: IsOrderFilled2 GetActiveOrders: %w", err)
 	}
 	for _, o := range regularOrders {
 		if o.OrderID == orderID {
@@ -147,13 +140,6 @@ func (m *Manager) IsOrderFilled2(_ context.Context, orderID int64) (filled bool,
 		}
 	}
 
-	// Note: conditional orders (SL stop-limit) are NOT returned by /api/v4/orders.
-	// WhiteBit has no accessible endpoint to query active conditional orders.
-	// We rely on execution history to detect SL fills. If the SL is still active
-	// (not in regular orders, not in execution history), we return filled=false
-	// which is safe — the next poll will re-check.
-
-	// Not in any active list — check execution history
 	found, _, execErr := m.client.GetExecutedOrder(m.market, orderID)
 	if execErr != nil {
 		return false, fmt.Errorf("orders: IsOrderFilled2 GetExecutedOrder: %w", execErr)
@@ -162,26 +148,22 @@ func (m *Manager) IsOrderFilled2(_ context.Context, orderID int64) (filled bool,
 		return true, nil
 	}
 
-	// Order not in active orders AND not in execution history.
-	// This means the order was cancelled/expired/removed externally.
-	// Treat as filled so the position close flow can proceed.
-	fmt.Printf("[Orders] IsOrderFilled2: order %d not found anywhere — treating as filled\n", orderID)
+	// Not in active orders AND not in execution history — treat as filled.
+	log.Printf("[Orders] IsOrderFilled2: order %d not found anywhere — treating as filled\n", orderID)
 	return true, nil
 }
 
-// GetOpenPositions returns all open positions for the market.
+// GetOpenPositions returns all open margin positions for the market.
 func (m *Manager) GetOpenPositions(_ context.Context) ([]algorithm.OpenPosition, error) {
-	positions, err := m.client.GetPositions()
+	positions, err := m.client.GetMarginPositions()
 	if err != nil {
 		return nil, fmt.Errorf("orders: GetOpenPositions: %w", err)
 	}
 	var result []algorithm.OpenPosition
 	for _, p := range positions {
-		// WhiteBit returns "BTC-PERP" but we use "BTC_PERP" — normalize both
 		normalizedPos := strings.ReplaceAll(strings.ToUpper(p.Market), "-", "_")
 		normalizedWant := strings.ReplaceAll(strings.ToUpper(m.market), "-", "_")
 		if normalizedPos != normalizedWant {
-			fmt.Printf("[Orders] GetOpenPositions: skipping position market=%s (want %s)\n", p.Market, m.market)
 			continue
 		}
 		amount, _ := strconv.ParseFloat(p.Amount, 64)
@@ -189,14 +171,13 @@ func (m *Manager) GetOpenPositions(_ context.Context) ([]algorithm.OpenPosition,
 		if amount == 0 {
 			continue
 		}
-		// WhiteBit doesn't return a "side" field — determine from amount sign
-		// Negative amount = short, positive = long
+		// Margin API returns explicit side: "sell" = short, "buy" = long
+		rawSide := strings.ToLower(p.Side)
 		side := "long"
-		if amount < 0 {
+		if rawSide == "sell" {
 			side = "short"
-			amount = -amount
 		}
-		fmt.Printf("[Orders] GetOpenPositions: found position market=%s side=%s amount=%.4f basePrice=%.2f\n", p.Market, side, amount, basePrice)
+		log.Printf("[Orders] GetOpenPositions: found position market=%s side=%s amount=%.4f basePrice=%.2f", p.Market, side, amount, basePrice)
 		result = append(result, algorithm.OpenPosition{
 			Market:    p.Market,
 			Side:      side,
@@ -208,7 +189,6 @@ func (m *Manager) GetOpenPositions(_ context.Context) ([]algorithm.OpenPosition,
 }
 
 // GetActiveShortOrders returns all active sell orders for the market.
-// Used by the state machine to detect manually placed orders and prevent duplicate order placement.
 func (m *Manager) GetActiveShortOrders(_ context.Context) ([]algorithm.ActiveOrder, error) {
 	orders, err := m.client.GetActiveCollateralLimitOrders(m.market)
 	if err != nil {
