@@ -34,6 +34,10 @@ export interface AlgoState {
   currentImpulse?: number;
   cooldownRemaining?: number;
   highConfirmRemaining?: number;
+
+  // Last API error
+  lastError?: string;
+  lastErrorAt?: string; // ISO datetime
 }
 
 // Candlestick data
@@ -78,7 +82,7 @@ export interface ReasoningSnapshot {
 
 // WebSocket message from backend
 export interface WSMessage {
-  type: 'price_tick' | 'candle' | 'algo_state' | 'order_update' | 'pnl_update';
+  type: 'price_tick' | 'candle' | 'algo_state' | 'order_update' | 'pnl_update' | 'api_error';
   data: unknown;
 }
 

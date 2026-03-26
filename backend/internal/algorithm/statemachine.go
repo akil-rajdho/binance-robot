@@ -72,6 +72,10 @@ type AlgoState struct {
 	CurrentImpulse       float64 `json:"currentImpulse"`       // current impulse value (high - windowOpen) / windowOpen
 	CooldownRemaining    float64 `json:"cooldownRemaining"`    // seconds remaining in cooldown (0 if none)
 	HighConfirmRemaining float64 `json:"highConfirmRemaining"` // seconds remaining for high confirmation (0 if confirmed)
+
+	// Last error from WhiteBit API (empty if no recent error)
+	LastError   string    `json:"lastError,omitempty"`
+	LastErrorAt time.Time `json:"lastErrorAt,omitempty"`
 }
 
 // ReasoningSnapshot is stored in DB when an order is placed.
@@ -229,6 +233,10 @@ type StateMachine struct {
 	entryOffset          float64   // current offset for entry price (dynamic runtime state)
 	lastActiveOrderCheck time.Time // throttle: at most one active-order guard check per 30s
 
+	// error tracking for dashboard display
+	lastError   string
+	lastErrorAt time.Time
+
 	// callbacks
 	OnStateChange func(AlgoState) // broadcast to dashboard
 
@@ -260,6 +268,19 @@ func NewStateMachine(priceWindow *PriceWindow, orderMgr OrderManager, db DBStore
 		maxATRUsdt:         300.0,
 		atrCandles:         make([]atrCandle, 0, 15),
 	}
+}
+
+// recordError stores an API error for display on the dashboard. Must be called with sm.mu held.
+func (sm *StateMachine) recordError(err error) {
+	sm.lastError = err.Error()
+	sm.lastErrorAt = time.Now()
+	log.Printf("[StateMachine] API error recorded: %v", err)
+}
+
+// clearError clears the last error. Must be called with sm.mu held.
+func (sm *StateMachine) clearError() {
+	sm.lastError = ""
+	sm.lastErrorAt = time.Time{}
 }
 
 // OnCandle is called by the price feed for each candle update.
@@ -323,6 +344,9 @@ func (sm *StateMachine) pollOrderStatus(ctx context.Context) {
 func (sm *StateMachine) checkForUntrackedPositions(ctx context.Context) {
 	positions, err := sm.orderMgr.GetOpenPositions(ctx)
 	if err != nil {
+		sm.mu.Lock()
+		sm.recordError(err)
+		sm.mu.Unlock()
 		return // non-fatal, will retry next poll
 	}
 
@@ -445,6 +469,9 @@ func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
 	filled, cancelled, fillPrice, err := sm.orderMgr.IsOrderFilled(ctx, orderID)
 	if err != nil {
 		log.Printf("[StateMachine] IsOrderFilled error for order %d: %v", orderID, err)
+		sm.mu.Lock()
+		sm.recordError(err)
+		sm.mu.Unlock()
 		return
 	}
 
@@ -504,12 +531,18 @@ func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
 	tpID, err := sm.orderMgr.PlaceTakeProfit(ctx, orderID, tpPrice, "0")
 	if err != nil {
 		log.Printf("[StateMachine] PlaceTakeProfit error: %v", err)
+		sm.mu.Lock()
+		sm.recordError(err)
+		sm.mu.Unlock()
 		return
 	}
 
 	slID, err := sm.orderMgr.PlaceStopLoss(ctx, orderID, slPrice, "0")
 	if err != nil {
 		log.Printf("[StateMachine] PlaceStopLoss error: %v", err)
+		sm.mu.Lock()
+		sm.recordError(err)
+		sm.mu.Unlock()
 		return
 	}
 
@@ -610,6 +643,9 @@ func (sm *StateMachine) checkPositionClosed(ctx context.Context) {
 	tpFilled, err := sm.orderMgr.IsOrderFilled2(ctx, tpID)
 	if err != nil {
 		log.Printf("[StateMachine] IsOrderFilled2(TP %d) error: %v", tpID, err)
+		sm.mu.Lock()
+		sm.recordError(err)
+		sm.mu.Unlock()
 		return
 	}
 
@@ -621,6 +657,9 @@ func (sm *StateMachine) checkPositionClosed(ctx context.Context) {
 		positions, posErr := sm.orderMgr.GetOpenPositions(ctx)
 		if posErr != nil {
 			log.Printf("[StateMachine] GetOpenPositions error during SL check: %v", posErr)
+			sm.mu.Lock()
+			sm.recordError(posErr)
+			sm.mu.Unlock()
 			return
 		}
 		hasShortPosition := false
@@ -868,6 +907,7 @@ func (sm *StateMachine) OnPrice(price float64) {
 			activeOrders, guardErr := sm.orderMgr.GetActiveShortOrders(sm.ctx)
 			if guardErr != nil {
 				log.Printf("[StateMachine] GetActiveShortOrders guard error: %v", guardErr)
+				sm.recordError(guardErr)
 			} else if len(activeOrders) > 0 {
 				found := activeOrders[0]
 				orderPrice := found.Price
@@ -1021,10 +1061,12 @@ func (sm *StateMachine) OnPrice(price float64) {
 		orderID, err := sm.orderMgr.PlaceShortLimitOrder(sm.ctx, orderPrice, amount)
 		if err != nil {
 			log.Printf("[StateMachine] PlaceShortLimitOrder error: %v — cooling down 60s", err)
+			sm.recordError(err)
 			// Set a cooldown to prevent spamming on every tick (e.g., insufficient balance)
 			sm.lastCancelAt = time.Now()
 			return
 		}
+		sm.clearError() // successful order placement clears any previous error
 
 		tpPrice := orderPrice - sm.tpDistance
 		slPrice := orderPrice + sm.slDistance
@@ -1194,6 +1236,9 @@ func (sm *StateMachine) SyncOnEnable() {
 	activeOrders, err := sm.orderMgr.GetActiveShortOrders(sm.ctx)
 	if err != nil {
 		log.Printf("[StateMachine] SyncOnEnable: GetActiveShortOrders error: %v", err)
+		sm.mu.Lock()
+		sm.recordError(err)
+		sm.mu.Unlock()
 		return
 	}
 
@@ -1715,6 +1760,9 @@ func (sm *StateMachine) buildAlgoState() AlgoState {
 		CurrentImpulse:       impulse,
 		CooldownRemaining:    cooldownRemaining,
 		HighConfirmRemaining: highConfirmRemaining,
+
+		LastError:   sm.lastError,
+		LastErrorAt: sm.lastErrorAt,
 	}
 }
 

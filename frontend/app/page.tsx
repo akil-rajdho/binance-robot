@@ -146,6 +146,24 @@ export default function Home() {
         </div>
       )}
 
+      {/* WhiteBit API error banner */}
+      {algoState?.lastError && (
+        <div className="bg-red-900/40 border-b border-red-800 px-4 py-3 md:px-6">
+          <div className="mx-auto max-w-screen-2xl flex items-start gap-3">
+            <span className="mt-0.5 text-red-400 font-bold text-lg leading-none">!</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-300">WhiteBit API Error</p>
+              <p className="text-sm text-red-400/90 break-all mt-0.5">{algoState.lastError}</p>
+              {algoState.lastErrorAt && (
+                <p className="text-xs text-red-500/70 mt-1">
+                  {new Date(algoState.lastErrorAt).toLocaleString()}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="mx-auto max-w-screen-2xl space-y-4 p-2 pb-20 md:p-6 md:pb-6">
         {/* Row 1: PriceTicker (2/3) | PnlSummary (1/3) */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
