@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"sync"
 	"time"
 )
@@ -1062,7 +1063,22 @@ func (sm *StateMachine) OnPrice(price float64) {
 		rawAmount := sm.positionSizeUSDT / price * float64(sm.leverage)
 		amount := fmt.Sprintf("%.6f", math.Floor(rawAmount*1e6)/1e6)
 
-		orderID, err := sm.orderMgr.PlaceShortLimitOrder(sm.ctx, orderPrice, amount)
+		// Retry with progressively smaller amounts if balance is insufficient
+		var orderID int64
+		var err error
+		for attempt := 0; attempt < 5; attempt++ {
+			orderID, err = sm.orderMgr.PlaceShortLimitOrder(sm.ctx, orderPrice, amount)
+			if err == nil {
+				break
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), "not enough balance") {
+				break // non-balance error, don't retry
+			}
+			// Reduce amount by 10% and retry
+			rawAmount *= 0.90
+			amount = fmt.Sprintf("%.6f", math.Floor(rawAmount*1e6)/1e6)
+			log.Printf("[StateMachine] Not enough balance — retrying with reduced amount %s (attempt %d)", amount, attempt+2)
+		}
 		if err != nil {
 			log.Printf("[StateMachine] PlaceShortLimitOrder error: %v — cooling down 60s", err)
 			sm.recordError(err)
