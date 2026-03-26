@@ -565,8 +565,11 @@ func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
 	sm.inProfit = false
 	sm.profitStartTime = time.Time{}
 	sm.tpTightened = false
-	rawAmt := sm.positionSizeUSDT / entryPrice * float64(sm.leverage)
-	sm.positionAmount = fmt.Sprintf("%.6f", math.Floor(rawAmt*1e6)/1e6)
+	// Keep the actual placed amount if already set (from retry logic); otherwise recalculate
+	if sm.positionAmount == "" {
+		rawAmt := sm.positionSizeUSDT / entryPrice * float64(sm.leverage)
+		sm.positionAmount = fmt.Sprintf("%.6f", math.Floor(rawAmt*1e6)/1e6)
+	}
 	// Reset entry offset on successful fill.
 	sm.entryOffset = sm.entryOffsetInitial
 	sm.state = StatePositionOpen
@@ -1087,6 +1090,7 @@ func (sm *StateMachine) OnPrice(price float64) {
 			return
 		}
 		sm.clearError() // successful order placement clears any previous error
+		sm.positionAmount = amount // store actual placed amount (may be reduced from retry)
 
 		tpPrice := orderPrice - sm.tpDistance
 		slPrice := orderPrice + sm.slDistance
