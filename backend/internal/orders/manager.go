@@ -48,7 +48,7 @@ func (m *Manager) CancelOrder(_ context.Context, orderID int64) error {
 }
 
 // PlaceTakeProfit places a limit BUY order to close a short position at the given price.
-// For margin trading, amount must be specified — no "0" close-entire shortcut.
+// amount "0" closes the entire position (collateral endpoint supports this).
 func (m *Manager) PlaceTakeProfit(_ context.Context, _ int64, price float64, amount string) (orderID int64, err error) {
 	priceStr := fmt.Sprintf("%.1f", price)
 	result, err := m.client.PlaceMarginLimitOrder(m.market, "buy", amount, priceStr)
@@ -60,7 +60,7 @@ func (m *Manager) PlaceTakeProfit(_ context.Context, _ int64, price float64, amo
 
 // PlaceStopLoss places a stop-limit BUY order to close a short position when price rises to SL price.
 // Uses activation_price = SL price, limit price = SL price + 10 (slippage buffer).
-// For margin trading, amount must be specified — no "0" close-entire shortcut.
+// amount "0" closes the entire position (collateral endpoint supports this).
 func (m *Manager) PlaceStopLoss(_ context.Context, _ int64, price float64, amount string) (orderID int64, err error) {
 	priceStr := fmt.Sprintf("%.1f", price)
 	limitStr := fmt.Sprintf("%.1f", price+10)
@@ -110,8 +110,13 @@ func (m *Manager) PlaceMarketClose(_ context.Context) (orderID int64, err error)
 	for _, p := range positions {
 		normalizedPos := strings.ReplaceAll(strings.ToUpper(p.Market), "-", "_")
 		normalizedWant := strings.ReplaceAll(strings.ToUpper(m.market), "-", "_")
-		if normalizedPos == normalizedWant && strings.ToLower(p.Side) == "sell" {
-			amount = p.Amount
+		if normalizedPos != normalizedWant {
+			continue
+		}
+		// Collateral API: negative amount = short position
+		parsedAmount, _ := strconv.ParseFloat(p.Amount, 64)
+		if parsedAmount < 0 {
+			amount = fmt.Sprintf("%.3f", -parsedAmount)
 			break
 		}
 	}
@@ -171,11 +176,11 @@ func (m *Manager) GetOpenPositions(_ context.Context) ([]algorithm.OpenPosition,
 		if amount == 0 {
 			continue
 		}
-		// Margin API returns explicit side: "sell" = short, "buy" = long
-		rawSide := strings.ToLower(p.Side)
+		// Collateral API: negative amount = short, positive = long
 		side := "long"
-		if rawSide == "sell" {
+		if amount < 0 {
 			side = "short"
+			amount = -amount
 		}
 		log.Printf("[Orders] GetOpenPositions: found position market=%s side=%s amount=%.4f basePrice=%.2f", p.Market, side, amount, basePrice)
 		result = append(result, algorithm.OpenPosition{

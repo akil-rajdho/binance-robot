@@ -316,9 +316,9 @@ func (c *Client) PlaceStopLimitOrder(market, side, amount, activationPrice, pric
 	return &result, nil
 }
 
-// PlaceMarginLimitOrder places a margin limit order.
+// PlaceMarginLimitOrder places a margin limit order via the collateral limit endpoint.
 func (c *Client) PlaceMarginLimitOrder(market, side, amount, price string) (*OrderResult, error) {
-	const endpoint = "/api/v4/order/margin"
+	const endpoint = "/api/v4/order/collateral/limit"
 	body := map[string]interface{}{
 		"market": market,
 		"side":   side,
@@ -332,10 +332,9 @@ func (c *Client) PlaceMarginLimitOrder(market, side, amount, price string) (*Ord
 	return &result, nil
 }
 
-// PlaceMarginMarketOrder places a margin market order.
-// amount must be the exact position size — no "0" shortcut for close-entire.
+// PlaceMarginMarketOrder places a margin market order via the collateral market endpoint.
 func (c *Client) PlaceMarginMarketOrder(market, side, amount string) (*OrderResult, error) {
-	const endpoint = "/api/v4/order/market"
+	const endpoint = "/api/v4/order/collateral/market"
 	body := map[string]interface{}{
 		"market": market,
 		"side":   side,
@@ -348,9 +347,9 @@ func (c *Client) PlaceMarginMarketOrder(market, side, amount string) (*OrderResu
 	return &result, nil
 }
 
-// PlaceMarginStopLimitOrder places a stop-limit order for margin trading.
+// PlaceMarginStopLimitOrder places a stop-limit order for margin trading via the collateral endpoint.
 func (c *Client) PlaceMarginStopLimitOrder(market, side, amount, activationPrice, price string) (*OrderResult, error) {
-	const endpoint = "/api/v4/order/stop-limit"
+	const endpoint = "/api/v4/order/collateral/stop-limit"
 	body := map[string]interface{}{
 		"market":           market,
 		"side":             side,
@@ -365,9 +364,9 @@ func (c *Client) PlaceMarginStopLimitOrder(market, side, amount, activationPrice
 	return &result, nil
 }
 
-// GetMarginPositions returns all open margin positions.
+// GetMarginPositions returns all open margin/collateral positions.
 func (c *Client) GetMarginPositions() ([]Position, error) {
-	const endpoint = "/api/v4/trade-account/margin/positions"
+	const endpoint = "/api/v4/collateral-account/positions/open"
 	body := map[string]interface{}{}
 	var result []Position
 	if err := c.doRequest(context.Background(), endpoint, body, &result); err != nil {
@@ -380,9 +379,9 @@ func (c *Client) GetMarginPositions() ([]Position, error) {
 	return result, nil
 }
 
-// GetMarginBalance returns the available USDT balance in the margin account.
+// GetMarginBalance returns the available USDT balance in the collateral account.
 func (c *Client) GetMarginBalance() (float64, error) {
-	const endpoint = "/api/v4/trade-account/margin/balance"
+	const endpoint = "/api/v4/collateral-account/balance"
 	body := map[string]interface{}{
 		"ticker": "USDT",
 	}
