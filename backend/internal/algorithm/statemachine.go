@@ -564,7 +564,8 @@ func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
 	sm.inProfit = false
 	sm.profitStartTime = time.Time{}
 	sm.tpTightened = false
-	sm.positionAmount = fmt.Sprintf("%.3f", sm.positionSizeUSDT/entryPrice*float64(sm.leverage))
+	rawAmt := sm.positionSizeUSDT / entryPrice * float64(sm.leverage)
+	sm.positionAmount = fmt.Sprintf("%.6f", math.Floor(rawAmt*1e6)/1e6)
 	// Reset entry offset on successful fill.
 	sm.entryOffset = sm.entryOffsetInitial
 	sm.state = StatePositionOpen
@@ -801,7 +802,8 @@ func (sm *StateMachine) forceClosePosition(ctx context.Context) {
 	// Use stored position amount; fall back to calculated if not set
 	if amount == "" {
 		if entryPrice > 0 {
-			amount = fmt.Sprintf("%.3f", posSize/entryPrice*float64(leverage))
+			rawA := posSize / entryPrice * float64(leverage)
+			amount = fmt.Sprintf("%.6f", math.Floor(rawA*1e6)/1e6)
 		} else {
 			amount = "0"
 		}
@@ -1056,7 +1058,9 @@ func (sm *StateMachine) OnPrice(price float64) {
 
 		// No existing active orders — place new order.
 		orderPrice := roundPrice(price + offset)
-		amount := fmt.Sprintf("%.3f", sm.positionSizeUSDT/price*float64(sm.leverage))
+		// Truncate (floor) to 6 decimal places to avoid rounding up and exceeding balance
+		rawAmount := sm.positionSizeUSDT / price * float64(sm.leverage)
+		amount := fmt.Sprintf("%.6f", math.Floor(rawAmount*1e6)/1e6)
 
 		orderID, err := sm.orderMgr.PlaceShortLimitOrder(sm.ctx, orderPrice, amount)
 		if err != nil {
@@ -2046,7 +2050,8 @@ func (sm *StateMachine) RecoverOpenTrades(ctx context.Context) error {
 		sm.tpPrice = trade.TPPrice
 		sm.slPrice = trade.SLPrice
 		if trade.OrderPrice > 0 {
-			sm.positionAmount = fmt.Sprintf("%.3f", sm.positionSizeUSDT/trade.OrderPrice*float64(sm.leverage))
+			recAmt := sm.positionSizeUSDT / trade.OrderPrice * float64(sm.leverage)
+			sm.positionAmount = fmt.Sprintf("%.6f", math.Floor(recAmt*1e6)/1e6)
 		}
 		sm.mu.Unlock()
 
