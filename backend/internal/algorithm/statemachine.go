@@ -200,6 +200,10 @@ type StateMachine struct {
 	inProfit        bool      // whether the position is currently in profit
 	tpTightened     bool      // true after forceClosePosition tightened TP; prevents re-tightening
 
+	// trailing TP state
+	trailingActive bool    // true once price enters the TP zone
+	trailingLow    float64 // lowest price seen since trailing activated (best profit for short)
+
 	// config (read from DB)
 	positionSizeUSDT  float64
 	leverage          int
@@ -221,7 +225,8 @@ type StateMachine struct {
 
 	maxATRUsdt   float64 // ATR halt threshold: skip entry if 14-candle ATR > this (default 300)
 
-	highConfirmSeconds int // seconds a new 10m high must persist before placing an order (0 = disabled)
+	highConfirmSeconds int     // seconds a new 10m high must persist before placing an order (0 = disabled)
+	trailingTPDistance float64 // once TP zone reached, trail by this amount; close when price reverses by this distance (0 = disabled, use fixed TP)
 
 	// ATR candle buffer (rolling 15 candles: 14 periods need 15 candle highs/lows/closes)
 	atrCandles   []atrCandle // ring of last 15 candles for ATR computation
@@ -565,6 +570,8 @@ func (sm *StateMachine) checkOrderFilled(ctx context.Context) {
 	sm.inProfit = false
 	sm.profitStartTime = time.Time{}
 	sm.tpTightened = false
+	sm.trailingActive = false
+	sm.trailingLow = 0
 	// Keep the actual placed amount if already set (from retry logic); otherwise recalculate
 	if sm.positionAmount == "" {
 		rawAmt := sm.positionSizeUSDT / entryPrice * float64(sm.leverage)
@@ -742,6 +749,8 @@ func (sm *StateMachine) checkPositionClosed(ctx context.Context) {
 	sm.tpPrice = 0
 	sm.slPrice = 0
 	sm.tpTightened = false
+	sm.trailingActive = false
+	sm.trailingLow = 0
 	sm.positionAmount = ""
 	sm.entryOffset = sm.entryOffsetInitial // reset adaptive offset after successful trade close
 	algoState := sm.buildAlgoState()
@@ -1176,15 +1185,68 @@ func (sm *StateMachine) OnPrice(price float64) {
 		// Track how long the position has been continuously profitable.
 		isCurrentlyProfitable := price < sm.activeOrderPrice
 		if isCurrentlyProfitable && !sm.inProfit {
-			// Just became profitable — start the timer.
 			sm.inProfit = true
 			sm.profitStartTime = time.Now()
 			log.Printf("[StateMachine] Position entered profit at $%.2f (entry: $%.2f)", price, sm.activeOrderPrice)
 		} else if !isCurrentlyProfitable && sm.inProfit {
-			// Left the profit zone — reset timer.
 			sm.inProfit = false
 			sm.profitStartTime = time.Time{}
 			log.Printf("[StateMachine] Position left profit zone at $%.2f", price)
+		}
+
+		// Trailing TP logic: once price drops below entry by tpDistance, start trailing.
+		// Cancel the fixed TP and track the lowest price. When price bounces up by
+		// trailingTPDistance from the low, close the position.
+		if sm.trailingTPDistance > 0 && sm.activeOrderPrice > 0 {
+			tpZone := sm.activeOrderPrice - sm.tpDistance
+			if price <= tpZone && !sm.trailingActive {
+				// Price entered the TP zone — activate trailing
+				sm.trailingActive = true
+				sm.trailingLow = price
+				log.Printf("[StateMachine] Trailing TP activated at $%.2f (entry: $%.2f, TP zone: $%.2f)", price, sm.activeOrderPrice, tpZone)
+
+				// Cancel the fixed TP order — we'll close via trailing now
+				if sm.tpOrderID != 0 {
+					tpID := sm.tpOrderID
+					go func() {
+						if err := sm.orderMgr.CancelOrder(sm.ctx, tpID); err != nil {
+							log.Printf("[StateMachine] Cancel fixed TP for trailing: %v", err)
+						} else {
+							log.Printf("[StateMachine] Cancelled fixed TP order %d — now trailing", tpID)
+						}
+					}()
+				}
+			} else if sm.trailingActive {
+				// Update trailing low
+				if price < sm.trailingLow {
+					sm.trailingLow = price
+					log.Printf("[StateMachine] Trailing low updated to $%.2f (profit: $%.2f)", price, sm.activeOrderPrice-price)
+				}
+
+				// Check if price bounced up by trailingTPDistance from the low
+				if price >= sm.trailingLow+sm.trailingTPDistance {
+					log.Printf("[StateMachine] Trailing TP triggered: price $%.2f bounced $%.2f from low $%.2f — closing position",
+						price, price-sm.trailingLow, sm.trailingLow)
+
+					// Place a tight limit order to close (slightly above current price for quick fill)
+					closePrice := roundPrice(price + 15)
+					go func() {
+						closeID, err := sm.orderMgr.PlaceTakeProfit(sm.ctx, 0, closePrice, "0")
+						if err != nil {
+							log.Printf("[StateMachine] Trailing TP close order failed: %v — will retry on next tick", err)
+							sm.mu.Lock()
+							sm.recordError(err)
+							sm.mu.Unlock()
+							return
+						}
+						sm.mu.Lock()
+						sm.tpOrderID = closeID
+						sm.tpPrice = closePrice
+						sm.mu.Unlock()
+						log.Printf("[StateMachine] Trailing TP close order placed: #%d at $%.2f", closeID, closePrice)
+					}()
+				}
+			}
 		}
 	}
 }
@@ -1568,6 +1630,11 @@ func (sm *StateMachine) LoadConfig() error {
 		return fmt.Errorf("GetSetting(high_confirm_seconds): %w", err)
 	}
 
+	trailingTPDistanceStr, err := sm.db.GetSetting("trailing_tp_distance")
+	if err != nil {
+		return fmt.Errorf("GetSetting(trailing_tp_distance): %w", err)
+	}
+
 	var posSize float64
 	if _, scanErr := fmt.Sscanf(posSizeStr, "%f", &posSize); scanErr != nil {
 		return fmt.Errorf("parse position_size_usdt %q: %w", posSizeStr, scanErr)
@@ -1643,6 +1710,11 @@ func (sm *StateMachine) LoadConfig() error {
 		return fmt.Errorf("parse high_confirm_seconds %q: %w", highConfirmSecondsStr, scanErr)
 	}
 
+	var trailingTPDistance float64
+	if _, scanErr := fmt.Sscanf(trailingTPDistanceStr, "%f", &trailingTPDistance); scanErr != nil {
+		return fmt.Errorf("parse trailing_tp_distance %q: %w", trailingTPDistanceStr, scanErr)
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.positionSizeUSDT = posSize
@@ -1661,6 +1733,7 @@ func (sm *StateMachine) LoadConfig() error {
 	sm.minImpulsePct = minImpulsePct
 	sm.maxATRUsdt = maxATRUsdt
 	sm.highConfirmSeconds = highConfirmSeconds
+	sm.trailingTPDistance = trailingTPDistance
 
 	log.Printf("[StateMachine] Config loaded: positionSize=%.2f, leverage=%d, dailyLossLimit=%.4f, botEnabled=%v, entryOffsetInitial=%.0f, entryOffsetStep=%.0f, entryOffsetMin=%.0f, orderCancelMinutes=%.0f, tpDistance=%.0f, slDistance=%.0f, minGapPct=%.4f, cooldownMins=%.0f, offsetPct=%.4f, impulsePct=%.4f, maxATR=%.0f, highConfirmSeconds=%d",
 		sm.positionSizeUSDT, sm.leverage, sm.dailyLossLimitPct, sm.botEnabled,

@@ -135,6 +135,7 @@ func (d *DB) insertDefaultSettings() error {
 		"min_impulse_pct":        "0.0020",
 		"max_atr_usdt":           "300",
 		"high_confirm_seconds":   "120",
+		"trailing_tp_distance":   "30",
 	}
 
 	for key, value := range defaults {

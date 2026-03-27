@@ -123,4 +123,5 @@ export interface BotSettings {
   entry_offset_pct: string;
   min_impulse_pct: string;
   max_atr_usdt: string;
+  trailing_tp_distance: string;
 }

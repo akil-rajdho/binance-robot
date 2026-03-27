@@ -70,6 +70,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
   const [minImpulsePct, setMinImpulsePct] = useState('');
   const [maxAtrUsdt, setMaxAtrUsdt] = useState('');
   const [highConfirmSeconds, setHighConfirmSeconds] = useState('');
+  const [trailingTpDistance, setTrailingTpDistance] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -126,6 +127,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
         setMinImpulsePct(settings.min_impulse_pct ?? '');
         setMaxAtrUsdt(settings.max_atr_usdt ?? '');
         setHighConfirmSeconds(settings.high_confirm_seconds ?? '');
+        setTrailingTpDistance(settings.trailing_tp_distance ?? '');
       })
       .catch(console.error);
   }, [open, token, onActivity]);
@@ -152,6 +154,7 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
         min_impulse_pct: minImpulsePct,
         max_atr_usdt: maxAtrUsdt,
         high_confirm_seconds: highConfirmSeconds,
+        trailing_tp_distance: trailingTpDistance,
       });
       setSaveSuccess(true);
       window.scrollTo(0, 0);
@@ -351,6 +354,15 @@ export default function Settings({ open, onClose, onSave, currentEntryOffset, to
             >
               <input id="slDistance" type="number" min="0" step="any" value={slDistance}
                 onChange={e => setSlDistance(e.target.value)} placeholder="e.g. 200" className={inputClass} />
+            </SettingField>
+
+            <SettingField
+              id="trailingTpDistance"
+              label="Trailing TP Distance ($)"
+              description={`Once the position reaches the TP zone (price drops by TP Distance from entry), the bot cancels the fixed TP order and starts trailing the price downward. It tracks the lowest price seen and closes the position when price bounces back up by this amount.\n\nExample: Entry at $69,500, TP Distance $200, Trailing $30. Price drops to $69,300 (TP zone reached) — trailing activates. Price continues to $69,100 — trailing low updated. Price bounces to $69,130 (+$30 from low) — position closed at $69,130 with $370 profit instead of $200.\n\nThis lets winners run beyond the fixed TP while locking in profit on reversal. Set to 0 to disable trailing and use fixed TP only.`}
+            >
+              <input id="trailingTpDistance" type="number" min="0" step="any" value={trailingTpDistance}
+                onChange={e => setTrailingTpDistance(e.target.value)} placeholder="e.g. 30" className={inputClass} />
             </SettingField>
 
           </div>
